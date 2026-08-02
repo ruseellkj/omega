@@ -1,0 +1,17 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Study material: cloned third-party reference repos (Pi, Tau) and pulled
+# video transcripts. Reference input, never committed to this repo.
+research/
+
+# Generated PDF/HTML handbook output
+docs/dist/
