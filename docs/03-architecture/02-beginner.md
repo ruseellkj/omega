@@ -259,9 +259,14 @@ scale: not because 70 lines is too few, but because there's nowhere to put anyth
 
 ## Should you build this first?
 
-**Yes** — as Tier 1, and then throw most of it away.
+**Yes** — as a **Tier 0 spike**, and then throw most of it away.
 
-What survives into Tier 2: the loop shape, the stop condition, errors-as-text. What gets replaced:
+Not Tier 1. Tier 1 is ~700 lines across eight files, *with* a provider interface, the 12 stream
+events, output truncation, a turn limit, and an offline test double — see
+`../06-product-roadmap.md` §"Tier 1" and `../04-folder-trees.md` §2. This file has none of those.
+It's the warm-up that makes Tier 1's structure feel necessary rather than ceremonial.
+
+What survives into Tier 1: the loop shape, the stop condition, errors-as-text. What gets replaced:
 everything else.
 
 The value isn't the code. It's that after hitting failures 1, 2, and 7 personally, the production
