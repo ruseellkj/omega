@@ -9,6 +9,11 @@ wheels/
 # Virtual environments
 .venv
 
+# Local secrets. .env holds a live ANTHROPIC_API_KEY; .env.sample is the
+# committed placeholder template.
+.env
+!.env.sample
+
 # Study material: cloned third-party reference repos (Pi, Tau) and pulled
 # video transcripts. Reference input, never committed to this repo.
 research/
