@@ -76,6 +76,7 @@ FILES=(
   docs/00-concepts/security.md
   docs/03-architecture/02-beginner.md
   docs/03-architecture/03-production.md
+  docs/03-architecture/04-boundaries-and-layout.md
   docs/01-teardown/01-provider-stream.md
   docs/01-teardown/02-agent-loop-tools.md
   docs/01-teardown/03-coding-tools.md
