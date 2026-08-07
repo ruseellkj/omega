@@ -20,3 +20,6 @@ research/
 
 # Generated PDF/HTML handbook output
 docs/dist/
+
+# Git worktrees created for isolated work. Local scratch, never committed.
+.claude/worktrees/
