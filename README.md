@@ -8,7 +8,7 @@ next. There is no working agent in this repo yet.
 
 ## What's here
 
-Everything so far lives in [`docs/`](docs/). It's a study of two minimal, MIT-licensed coding
+Everyting so far lives in [`docs/`](docs/). It's a study of two minimal, MIT-licensed coding
 agents, written up so the concepts are usable rather than just described.
 
 Suggested reading order:

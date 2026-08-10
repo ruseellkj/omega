@@ -1,10 +1,8 @@
 import json, os, subprocess, sys
 from anthropic import Anthropic
+from anthropic.types import Message
 from dotenv import load_dotenv
 
-# override=True so this project's .env wins over any ANTHROPIC_API_KEY the shell
-# already exports. Without it dotenv silently keeps the inherited value and .env
-# is never read.
 load_dotenv(override=True)
 
 if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -75,7 +73,7 @@ run_shell_schema = {
 TOOLS = [read_file_schema, write_file_schema, run_shell_schema]
 
 
-def run_tool(name: str, tool_input: dict) -> tuple[str, bool]:
+def run_tool(tool_name: str, tool_input: dict) -> tuple[str, bool]:
     """Do what the model asked. Return (output_text, is_error) — never raise.
 
     Tool failures come back as text so the model can read them and react. Raising
@@ -85,15 +83,15 @@ def run_tool(name: str, tool_input: dict) -> tuple[str, bool]:
     every field is read with ["key"], not attribute access.
     """
     try:
-        if name == "read_file":
+        if tool_name == "read_file":
             return open(tool_input["path"], "r").read(), False
 
-        if name == "write_file":
+        if tool_name == "write_file":
             content = tool_input["content"]
             open(tool_input["path"], "w").write(content)
             return f"Wrote {len(content)} chars to {tool_input['path']}", False
 
-        if name == "run_shell":
+        if tool_name == "run_shell":
             # No check=True: a non-zero exit is exactly the case worth reporting,
             # and raising would throw away the output explaining why it failed.
             done = subprocess.run(
@@ -102,26 +100,23 @@ def run_tool(name: str, tool_input: dict) -> tuple[str, bool]:
             output = (done.stdout + done.stderr) or "(no output)"
             return output, done.returncode != 0
 
-        return f"Unknown tool: {name}", True
+        return f"Unknown tool: {tool_name}", True
     except Exception as e:
         return f"Error: {e}", True
 
 
-def run_tool_calls(message) -> list[dict]:
+def run_tool_calls(message: Message) -> list[dict]:
     """Execute every tool_use block in the message; return the result blocks."""
+    tool_requests = [block for block in message.content if block.type == "tool_use"]
+
     tool_result_blocks = []
-
-    for tool_request in message.content:
-        if tool_request.type != "tool_use":
-            continue
-
+    for tool_request in tool_requests:
         print(f"  → {tool_request.name}({json.dumps(tool_request.input)[:80]})")
         output, is_error = run_tool(tool_request.name, tool_request.input)
 
         tool_result_blocks.append({
             "type": "tool_result",
             "tool_use_id": tool_request.id,
-            # Raw text, not json.dumps(...) — escaping adds noise and burns tokens.
             "content": output,
             "is_error": is_error,
         })
