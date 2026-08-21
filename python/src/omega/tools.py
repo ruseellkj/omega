@@ -27,7 +27,8 @@ from pydantic import Field, model_validator
 
 from omega.types import CancellationToken, TextContent, WireModel
 
-
+# this class uses pydantic
+# what a tool hands back. It's the tool's output, nothing more.
 class ToolResult(WireModel):
     """What a tool produces when it succeeds."""
 
@@ -51,7 +52,7 @@ class ToolResult(WireModel):
 #: token it is expected to honour for anything long-running.
 ToolExecutor = Callable[[dict[str, Any], CancellationToken | None], Awaitable[ToolResult]]
 
-
+# this class uses dataclass
 @dataclass(frozen=True, slots=True)
 class Tool:
     """A capability offered to the model.

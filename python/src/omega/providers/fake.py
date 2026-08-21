@@ -50,13 +50,14 @@ class FakeCall:
 
 class FakeProvider:
     """Replays one scripted event list per call, in order.
-
     Satisfies `ModelProvider` structurally — note it inherits from nothing.
+
+    You hand it one script per expected call. Three scripts = the loop can call three times.
     """
 
-    def __init__(self, streams: Iterable[Sequence[AssistantMessageEvent]] = ()) -> None:
+    def __init__(self, streams = ()) -> None:
         self.streams: list[list[AssistantMessageEvent]] = [list(s) for s in streams]
-        self.calls: list[FakeCall] = []
+        self.calls: list[FakeCall] = [] # this is a list of what all we got (fake call)
 
     def stream_response(
         self,
@@ -71,10 +72,11 @@ class FakeProvider:
             FakeCall(model=model, system=system, messages=list(messages), tools=list(tools))
         )
         stream = self.streams.pop(0) if self.streams else []
-
+        # console.log(f"FakeProvider: returning {len(stream)} events for call {len(self.calls)}")
+        # console.log(f"stream: {stream}")
         async def iterator() -> AsyncIterator[AssistantMessageEvent]:
             for event in stream:
-                if signal is not None and signal.is_cancelled():
+                if signal is not None and signal.is_cancelled(): # this is the function defined in cancellation token
                     return
                 yield event
 
@@ -87,9 +89,14 @@ class FakeProvider:
 # --------------------------------------------------------------------------
 
 
+#  AssistantStartEvent  
+#   TextStartEvent    
+#   TextDeltaEvent        
+#   AssistantDoneEvent
+
 def text_turn(text: str, *, model: str = "fake-model") -> list[AssistantMessageEvent]:
     """A turn that says something and asks for nothing. The loop should stop."""
-    partial = AssistantMessage(model=model)
+    partial = AssistantMessage(model=model) # the whole message so far
     events: list[AssistantMessageEvent] = [
         AssistantStartEvent(partial=partial.model_copy(deep=True))
     ]
@@ -97,8 +104,10 @@ def text_turn(text: str, *, model: str = "fake-model") -> list[AssistantMessageE
     partial.content.append(TextContent(text=""))
     events.append(TextStartEvent(content_index=0, partial=partial.model_copy(deep=True)))
 
+    # extract the block we just added, so we can mutate it in place and have the partials reflect that
     block = partial.content[0]
     assert isinstance(block, TextContent)
+    # add the text to the block, which will be reflected in the partials
     block.text = text
     events.append(
         TextDeltaEvent(content_index=0, delta=text, partial=partial.model_copy(deep=True))
