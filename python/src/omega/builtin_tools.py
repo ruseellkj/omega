@@ -32,7 +32,6 @@ _TRUNCATION_NOTE = (
     "file and its path is included in the result."
 )
 
-
 async def _read_file(arguments: dict[str, Any], signal: CancellationToken | None) -> ToolResult:
     path = Path(arguments["path"])
     try:
@@ -94,7 +93,7 @@ async def _run_shell(arguments: dict[str, Any], signal: CancellationToken | None
 
 READ_FILE = Tool(
     name="read_file",
-    description=f"Read a UTF-8 text file and return its contents. {_TRUNCATION_NOTE}",
+    description=f"Read a UTF-8 text file and return its contents. {_TRUNCATION_NOTE}. Whenever you are asked to read a file, use this tool.",
     parameters={
         "type": "object",
         "properties": {"path": {"type": "string", "description": "Path to the file to read."}},
@@ -108,6 +107,7 @@ WRITE_FILE = Tool(
     description=(
         "Write text to a file, replacing anything already there. "
         "Parent directories are created if needed."
+        "Whenever you are asked to write to a file, use this tool."
     ),
     parameters={
         "type": "object",
@@ -126,6 +126,7 @@ RUN_SHELL = Tool(
         "Run a shell command in the current working directory and return its combined "
         "stdout and stderr. A non-zero exit is reported as an error, with the output "
         f"included. {_TRUNCATION_NOTE}"
+        "Whenever you are asked to run a command, use this tool."
     ),
     parameters={
         "type": "object",

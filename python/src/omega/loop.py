@@ -1,7 +1,6 @@
 """The agent loop.
 
-Ask the model. If it requested tools, run them and report back. Repeat until it
-stops asking. That is the whole idea, and it is why this file is short.
+Ask qs to the model instead of knowing answers. If it requested tools, run them and report back. Repeat until it stops asking. That is the whole idea, and it is why this file is short.
 
 **It should stay short.** If this file is growing, something in it is a *decision*
 rather than the *mechanism* — may I run this, should I compact, is this output too
@@ -54,13 +53,7 @@ async def run_agent_loop(
     for _turn in range(max_turns):
         assistant: AssistantMessage | None = None
 
-        async for event in provider.stream_response(
-            model=model,
-            system=system,
-            messages=messages,
-            tools=tools,
-            signal=signal,
-        ):
+        async for event in provider.stream_response(model=model,system=system,messages=messages,tools=tools,signal=signal):
             yield event
             # The provider guarantees exactly one terminal event, so exactly one
             # of these fires. Both carry the final message; an error still
@@ -90,13 +83,13 @@ async def run_agent_loop(
 
         # Stop on CONTENT, not on stop_reason. A response can carry tool calls
         # while its stop reason says something else, and content is ground truth
-        # where a stop reason is provider-reported metadata.
-        calls = assistant.tool_calls
-        if not calls:
+        # call is tool_request
+        tool_requests = assistant.tool_calls
+        if not tool_requests:
             return
 
-        for call in calls:
-            messages.append(await _execute_tool_call(call, tool_by_name, signal))
+        for tool_request in tool_requests:
+            messages.append(await _execute_tool_call(tool_request, tool_by_name, signal))
 
     # Fell out of the loop: a model that never stops asking would otherwise run
     # until the budget is gone. Reported as an event rather than appended to the
@@ -112,7 +105,7 @@ async def run_agent_loop(
 
 
 async def _execute_tool_call(
-    call: ToolCall,
+    tool_request: ToolCall,
     tool_by_name: dict[str, Tool],
     signal: CancellationToken | None,
 ) -> ToolResultMessage:
@@ -122,15 +115,15 @@ async def _execute_tool_call(
     tool result. The model reads failures as observations and adapts, which is
     the entire point of an agent loop. An exception here would end the run instead.
     """
-    tool = tool_by_name.get(call.name)
+    tool = tool_by_name.get(tool_request.name)
     if tool is None:
-        return _error_result(call, f"Tool {call.name} not found")
+        return _error_result(tool_request, f"Tool {tool_request.name} not found")
 
     if signal is not None and signal.is_cancelled():
-        return _error_result(call, "Operation aborted")
+        return _error_result(tool_request, "Operation aborted")
 
     try:
-        result = await tool.execute(call.arguments, signal)
+        result = await tool.execute(tool_request.arguments, signal)
     except asyncio.CancelledError:
         # Cancellation must propagate. Swallowing it in the broad except below
         # would make Ctrl-C unreliable — and this is Python, where cancellation
@@ -139,20 +132,20 @@ async def _execute_tool_call(
     except Exception as exc:  # noqa: BLE001 - tools are an isolation boundary
         # A tool is third-party code touching the filesystem and the network. If
         # a crashing tool crashed the agent, one bad tool would end every session.
-        return _error_result(call, str(exc) or exc.__class__.__name__)
+        return _error_result(tool_request, str(exc) or exc.__class__.__name__)
 
     return ToolResultMessage(
-        tool_call_id=call.id,
-        tool_name=call.name,
+        tool_call_id=tool_request.id,
+        tool_name=tool_request.name,
         content=result.content,
         is_error=False,
     )
 
 
-def _error_result(call: ToolCall, message: str) -> ToolResultMessage:
+def _error_result(tool_request: ToolCall, message: str) -> ToolResultMessage:
     return ToolResultMessage(
-        tool_call_id=call.id,
-        tool_name=call.name,
+        tool_call_id=tool_request.id,
+        tool_name=tool_request.name,
         content=message,  # type: ignore[arg-type]
         is_error=True,
     )

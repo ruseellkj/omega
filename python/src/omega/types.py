@@ -132,7 +132,7 @@ class AssistantMessage(WireModel):
             block.text for block in self.content if isinstance(block, TextContent)
         )
 
-
+#  a message in the transcript, sent to the API.
 class ToolResultMessage(WireModel):
     """The outcome of one tool call, reported back to the model.
 
