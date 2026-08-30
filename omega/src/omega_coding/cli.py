@@ -20,8 +20,6 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from dotenv import load_dotenv
-
 from omega_agent.agent_events import AgentEvent
 from omega_agent.harness import Harness
 from omega_agent.hooks import AgentHooks
@@ -37,6 +35,7 @@ from omega_coding.approval import Answer, ApprovalPolicy, ApprovalRequest
 from omega_coding.builtin_tools import build_tools
 from omega_coding.context import measure
 from omega_coding.cost import CostTracker, price_from_env
+from omega_coding.env import USER_CONFIG, find_env_files, load_environment
 from omega_coding.history import drop_empty_failed_turns
 from omega_coding.redact import redacting_hook
 
@@ -76,6 +75,28 @@ def _system_prompt(root: Path) -> str:
         f"{SYSTEM_PROMPT}\n\n"
         f"# Project instructions (from {PROJECT_INSTRUCTIONS_FILE})\n\n{extra}"
     )
+
+
+def _missing_key_message(variable: str, *, extra: str = "") -> str:
+    """Say where we looked.
+
+    A key reported as "not set" while it sits in a file three directories up is
+    an afternoon nobody should have to spend. Listing the search path turns a
+    dead end into an instruction.
+    """
+    searched = "\n".join(f"    {path}" for path in find_env_files(Path.cwd()))
+    lines = [
+        f"{variable} is not set. Looked for a .env in:",
+        searched,
+        "",
+        "Put it in ./.env for this project, or in",
+        f"    ~/{USER_CONFIG}",
+        "to set it once for every project. An exported variable overrides both.",
+    ]
+    if extra:
+        lines.append(extra)
+    lines.append("Or run `omega --fake` to try omega without a key.")
+    return "\n".join(lines)
 
 
 def _fake_provider() -> FakeProvider:
@@ -266,6 +287,12 @@ def main() -> None:
     # Choosing a provider is the *only* thing in this file that knows two of them
     # exist. Everything below - the harness, the hooks, the tools, the renderer -
     # is written against the interface and cannot tell which one it got.
+    # Loaded before anything else, and searched outward from where you are
+    # rather than from wherever omega happens to be installed. That difference
+    # is the whole point: a globally installed omega has no idea where its own
+    # source tree lives, and should not need to.
+    env_files = load_environment()
+
     provider: ModelProvider
     model = args.model
     if args.fake:
@@ -273,24 +300,23 @@ def main() -> None:
         model = model or "fake-model"
         print("omega (fake provider - scripted responses, nothing is sent anywhere)")
     elif args.provider == "openai":
-        # .env lives at the repo root, one level above this package.
-        load_dotenv(Path(__file__).resolve().parents[3] / ".env", override=True)
         base_url = args.base_url or os.environ.get("OPENAI_BASE_URL")
         if not os.environ.get("OPENAI_API_KEY") and not base_url:
             sys.exit(
-                "OPENAI_API_KEY not set - add it to .env, or pass --base-url to reach a "
-                "local server (Ollama, vLLM) that does not need one."
+                _missing_key_message(
+                    "OPENAI_API_KEY",
+                    extra=(
+                        "Or pass --base-url to reach a local server (Ollama, vLLM) "
+                        "that needs no key."
+                    ),
+                )
             )
         provider = OpenAIProvider(base_url=base_url)
         model = model or OPENAI_MODEL
         print(f"omega ({model} via openai{f' at {base_url}' if base_url else ''})")
     else:
-        load_dotenv(Path(__file__).resolve().parents[3] / ".env", override=True)
         if not os.environ.get("ANTHROPIC_API_KEY"):
-            sys.exit(
-                "ANTHROPIC_API_KEY not set - add it to .env (see .env.sample), "
-                "or run `omega --fake` to try omega without a key."
-            )
+            sys.exit(_missing_key_message("ANTHROPIC_API_KEY"))
         provider = AnthropicProvider()
         model = model or ANTHROPIC_MODEL
         print(f"omega ({model})")
@@ -301,6 +327,9 @@ def main() -> None:
     print(f"Working directory: {root} (reads and writes are confined to it)")
     if args.yes:
         print("Tool calls are approved automatically (--yes).")
+
+    for path in env_files:
+        print(f"Loaded environment from {path}")
 
     system = _system_prompt(root)
     if system is not SYSTEM_PROMPT:

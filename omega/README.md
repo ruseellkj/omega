@@ -23,7 +23,7 @@ destroys anything, and its provider abstraction is no longer a claim but a measu
 uv sync
 
 uv run omega --fake                 # scripted responses — no key, no network, no credits
-uv run omega                        # Anthropic; needs ANTHROPIC_API_KEY in ../.env
+uv run omega                        # Anthropic; needs ANTHROPIC_API_KEY (see below)
 uv run omega --provider openai      # OpenAI Chat Completions
 uv run omega --resume               # continue the most recent session here
 ```
@@ -41,6 +41,30 @@ uv run omega --provider openai --base-url http://localhost:11434/v1   # Ollama, 
 
 Drop an `OMEGA.md` in the working directory and its contents are appended to the system prompt,
 so project conventions stop being something you retype.
+
+### Installing it, and where the key goes
+
+```bash
+uv tool install --editable /path/to/omega     # `omega` now works from any directory
+```
+
+`--editable` so the installed command always runs the current source — otherwise you are running a
+snapshot and wondering why your changes did nothing.
+
+The API key is searched for **outward from wherever you run omega**, nearest first:
+
+```
+./.env                  this project
+../.env                 …and its parents, up to your home directory
+~/.config/omega/.env    set it once, every project sees it
+```
+
+An exported variable beats every file, so `ANTHROPIC_API_KEY=… omega` is a one-off override. The
+nearest file wins per variable, and further files fill in the rest — a project `.env` can override
+just the key while inheriting everything else from your global one.
+
+If the key is missing, omega prints the exact list of paths it searched rather than only saying it
+is unset.
 
 ## Check it
 
