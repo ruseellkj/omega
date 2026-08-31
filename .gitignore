@@ -35,3 +35,7 @@ SESSION-TRANSCRIPT.md
 # Saved omega sessions. Local working state, and they quote file contents and
 # command output verbatim - same reasoning as dev-notes/session-logs/.
 .omega/
+
+# Commits recorded by the pre-push hook, waiting to be written to the Notion
+# sync log. Local bookkeeping, cleared once synced.
+.omega-sync-pending.jsonl
