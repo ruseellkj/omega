@@ -19,6 +19,7 @@ you forgot.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 
 from omega_agent.agent_events import AgentEndReason, AgentEvent
 from omega_agent.cancellation import CancelSignal
@@ -74,6 +75,7 @@ async def run_headless(
     signal: CancelSignal | None = None,
     store: SessionStore | None = None,
     approve: bool,
+    root: Path | None = None,
 ) -> HeadlessResult:
     """One prompt, run to completion, with no interaction.
 
@@ -82,7 +84,17 @@ async def run_headless(
     """
     base = hooks if hooks is not None else AgentHooks()
     if base.before_tool_call is None:
-        base = replace(base, before_tool_call=ApprovalPolicy(auto_approve=approve))
+        # `root` only decides which paths count as "outside" for the gate. With
+        # `approve=True` nothing is asked anyway; with `approve=False` and no
+        # asker, everything but an inside-root read is refused either way. It
+        # still gets passed rather than defaulted inside the policy, so the one
+        # place that knows the working directory is the caller.
+        base = replace(
+            base,
+            before_tool_call=ApprovalPolicy(
+                root if root is not None else Path.cwd(), auto_approve=approve
+            ),
+        )
 
     harness = Harness(
         provider=provider,

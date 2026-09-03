@@ -112,7 +112,7 @@ omega/src/
 │   └── session/          append-only JSONL, parent_id on every entry
 │
 └── omega_coding/      ── L3 + L4 · files, shells, policy, the screen ──
-    ├── paths.py          confinement. ONE place, not per-tool.
+    ├── paths.py          path resolution. ONE place, not per-tool.
     ├── file_lock.py      one lock per resolved path
     ├── truncate.py       2,000 lines / 50 KB, tail-biased
     ├── builtin_tools.py  read, write, edit, run

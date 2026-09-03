@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from omega_agent.tools import Tool, ToolError
-from omega_coding.builtin_tools import build_tools
+from omega_coding.builtin_tools import build_tools, collect_guidelines
 from omega_coding.paths import PathOutsideRoot
 
 
@@ -48,25 +48,36 @@ async def test_write_file_creates_parent_directories(tmp_path: Path) -> None:
     assert "7 chars" in result.text
 
 
-# ------------------------------------------------------ confinement, in the tools
+# --------------------------------------------- outside the root: the tools allow it
 
 
-async def test_read_file_refuses_to_escape_the_root(tmp_path: Path) -> None:
-    """failure #4: Tier 1 could read ~/.ssh/id_rsa."""
+async def test_the_tools_no_longer_refuse_paths_outside_the_root(tmp_path: Path) -> None:
+    """Tier 2.5: the fence came out of the tools.
+
+    This test asserted the opposite at Tier 2, and the reversal is the whole
+    change. It is **not** a weakening on its own: `test_approval.py` now proves
+    the same read is gated, which is where the fence's job went. Read the two
+    together or neither means anything.
+    """
+    (tmp_path / "secret.txt").write_text("password")
+    root = tmp_path / "project"
+    root.mkdir()
+
+    result = await _tools(root)["read_file"].execute({"path": "../secret.txt"}, None)
+    assert result.text == "password"
+
+
+async def test_confine_restores_the_hard_fence(tmp_path: Path) -> None:
+    """`--confine` is the Tier 2 behaviour, kept for people who want it."""
     (tmp_path / "secret.txt").write_text("password")
     root = tmp_path / "project"
     root.mkdir()
 
     with pytest.raises(PathOutsideRoot):
-        await _tools(root)["read_file"].execute({"path": "../secret.txt"}, None)
-
-
-async def test_write_file_refuses_to_escape_the_root(tmp_path: Path) -> None:
-    root = tmp_path / "project"
-    root.mkdir()
+        await _tools(root, confine=True)["read_file"].execute({"path": "../secret.txt"}, None)
 
     with pytest.raises(PathOutsideRoot):
-        await _tools(root)["write_file"].execute(
+        await _tools(root, confine=True)["write_file"].execute(
             {"path": "../escaped.txt", "content": "x"}, None
         )
 
@@ -77,17 +88,80 @@ async def test_a_refused_write_creates_no_directories(tmp_path: Path) -> None:
     """Tier 1 ran mkdir(parents=True) before any check.
 
     A refusal that has already created `../a/b/c` on the way to being refused is
-    not a refusal. Confinement has to gate the mkdir, not just the write.
+    not a refusal. The check has to gate the mkdir, not just the write. Now
+    tested under `--confine`, since that is where a refusal still comes from the
+    tool rather than from the gate.
     """
     root = tmp_path / "project"
     root.mkdir()
 
     with pytest.raises(PathOutsideRoot):
-        await _tools(root)["write_file"].execute(
+        await _tools(root, confine=True)["write_file"].execute(
             {"path": "../outside/a/b/c.txt", "content": "x"}, None
         )
 
     assert not (tmp_path / "outside").exists(), "directories were created outside the root"
+
+
+async def test_a_denied_write_creates_no_directories_either(tmp_path: Path) -> None:
+    """The same property, on the path that now matters more.
+
+    Without `--confine` a write outside the root is stopped by the *gate*, before
+    the tool runs at all — so `mkdir` is never reached. Worth pinning: the gate
+    returning "not allowed" and the tool having already made three directories
+    would be the Tier 1 bug wearing a hook.
+    """
+    from omega_agent.types import ToolCall
+    from omega_coding.approval import ApprovalPolicy
+
+    root = tmp_path / "project"
+    root.mkdir()
+
+    policy = ApprovalPolicy(root, asker=None)  # no channel: everything is denied
+    decision = await policy(
+        ToolCall(
+            id="1",
+            name="write_file",
+            arguments={"path": "../outside/a/b/c.txt", "content": "x"},
+        )
+    )
+
+    assert not decision.allowed
+    assert not (tmp_path / "outside").exists()
+
+
+# ---------------------------------------------------- reading part of a large file
+
+
+async def test_offset_and_limit_take_a_window(tmp_path: Path) -> None:
+    """Borrowed from both references, and absent at Tier 2.
+
+    Without this, a file past the truncation budget is unreadable beyond its tail
+    and the model's only recourse is `sed` through the shell — which the tool
+    guidelines tell it not to reach for. Telling it not to while leaving it no
+    alternative is how a guideline gets ignored.
+    """
+    (tmp_path / "many.txt").write_text("\n".join(f"line {n}" for n in range(1, 101)))
+    read = _tools(tmp_path)["read_file"]
+
+    result = await read.execute({"path": "many.txt", "offset": 10, "limit": 3}, None)
+
+    assert result.text.strip() == "line 10\nline 11\nline 12"
+    assert result.details is not None
+    assert result.details["total_lines"] == 100
+    assert result.details["next_offset"] == 13, "the model needs to know to continue"
+
+
+async def test_reading_to_the_end_reports_no_next_offset(tmp_path: Path) -> None:
+    """`next_offset: None` is how "you have it all" is said."""
+    (tmp_path / "few.txt").write_text("a\nb\nc")
+    read = _tools(tmp_path)["read_file"]
+
+    result = await read.execute({"path": "few.txt", "offset": 2}, None)
+
+    assert result.text == "b\nc"
+    assert result.details is not None
+    assert result.details["next_offset"] is None
 
 
 async def test_each_root_gets_its_own_fence(tmp_path: Path) -> None:
@@ -206,3 +280,62 @@ async def test_there_are_four_tools_now(tmp_path: Path) -> None:
         "run_shell",
         "write_file",
     ]
+
+
+# ------------------------------------------------------------- tool descriptions
+
+
+def test_the_descriptions_do_not_route_between_tools(tmp_path: Path) -> None:
+    """Tier 2 wrote steering into the descriptions. Both references do not.
+
+    "Whenever you are asked to read a file, use this tool" is read *after* the
+    model has already picked a tool, so as routing it is close to useless — and
+    it crowds out the part a description is for, which is how to drive the
+    parameters. Pi and Tau both keep descriptions factual and put the steering
+    in the system prompt.
+    """
+    for tool in build_tools(tmp_path):
+        assert "whenever you are asked" not in tool.description.lower(), (
+            f"{tool.name} is still routing from its description"
+        )
+
+
+def test_every_tool_says_something_about_paths_or_scope(tmp_path: Path) -> None:
+    """A description that omits the constraint invites the call that hits it."""
+    by_name = {tool.name: tool for tool in build_tools(tmp_path)}
+
+    for name in ("read_file", "write_file", "edit_file"):
+        assert "working directory" in by_name[name].description, name
+    assert "not restricted" in by_name["run_shell"].description, (
+        "the shell's lack of confinement is the one thing it must admit"
+    )
+
+
+def test_guidelines_reach_the_system_prompt_not_the_description(tmp_path: Path) -> None:
+    """Tau's `prompt_guidelines`, ported. The `cat` line is the one that matters.
+
+    It is what stops a model shelling out to read a file — which would route
+    around the gate's oversight of the file tools entirely — and it can only work
+    from the system prompt, because by the time a description is read the tool
+    has been chosen.
+    """
+    tools = build_tools(tmp_path)
+    collected = collect_guidelines(tools)
+
+    assert "instead of cat" in collected
+    assert all(g not in t.description for t in tools for g in t.guidelines)
+
+
+def test_collect_guidelines_is_stable_and_deduplicated(tmp_path: Path) -> None:
+    """Byte-identical between runs, because prompt caching needs a stable prefix.
+
+    A `set` iterated directly would reorder between processes and quietly cost
+    money at Tier 3 — the same trap `_system_prompt` avoids by being built once.
+    """
+    tools = build_tools(tmp_path)
+
+    assert collect_guidelines(tools) == collect_guidelines(build_tools(tmp_path))
+
+    lines = collect_guidelines(tools).splitlines()
+    assert len(lines) == len(set(lines)), "a guideline was repeated"
+    assert collect_guidelines([]) == "", "no tools, no section"

@@ -24,8 +24,8 @@ from omega_coding.file_lock import FileLocks
 from omega_coding.paths import PathOutsideRoot
 
 
-def _edit(root: Path, locks: FileLocks | None = None) -> Tool:
-    tools = build_tools(root, locks=locks)
+def _edit(root: Path, locks: FileLocks | None = None, *, confine: bool = False) -> Tool:
+    tools = build_tools(root, locks=locks, confine=confine)
     return next(t for t in tools if t.name == "edit_file")
 
 
@@ -123,18 +123,34 @@ async def test_it_refuses_a_missing_file(tmp_path: Path) -> None:
     assert "not found" in str(excinfo.value).lower()
 
 
-async def test_it_is_confined_like_every_other_file_tool(tmp_path: Path) -> None:
-    """Inherited for free: edit calls the same resolve_within_root."""
+async def test_it_follows_the_same_path_rules_as_every_other_file_tool(
+    tmp_path: Path,
+) -> None:
+    """Inherited for free, in both directions.
+
+    `edit_file` never had path logic of its own — it calls whatever the factory
+    was given. So when the fence moved out of the tools at Tier 2.5, edit
+    followed without being touched, and `--confine` brings it back the same way.
+    That is the argument for one resolution point rather than four, tested rather
+    than asserted.
+    """
     outside = tmp_path / "secret.txt"
     outside.write_text("password")
     root = tmp_path / "project"
     root.mkdir()
 
+    # Default: allowed by the tool, and gated by approval instead.
+    await _edit(root).execute(
+        {"path": "../secret.txt", "old_text": "password", "new_text": "hacked"}, None
+    )
+    assert outside.read_text() == "hacked"
+
+    outside.write_text("password")
+
     with pytest.raises(PathOutsideRoot):
-        await _edit(root).execute(
+        await _edit(root, confine=True).execute(
             {"path": "../secret.txt", "old_text": "password", "new_text": "hacked"}, None
         )
-
     assert outside.read_text() == "password"
 
 

@@ -102,6 +102,7 @@ async def run_smoke(provider: ModelProvider, *, model: str) -> list[Check]:
             ),
             prompt=TASK,
             tools=build_tools(root),
+            root=root,
             approve=True,
             max_turns=6,
         )

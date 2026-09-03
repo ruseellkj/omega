@@ -26,13 +26,14 @@ from omega_agent.hooks import AgentHooks
 from omega_agent.loop import DEFAULT_MAX_TURNS
 from omega_agent.provider import ModelProvider
 from omega_agent.session import JsonlSessionStore
+from omega_agent.tools import Tool
 from omega_ai.anthropic import DEFAULT_MODEL as ANTHROPIC_MODEL
 from omega_ai.anthropic import AnthropicProvider
 from omega_ai.fake import FakeProvider, text_turn, tool_turn
 from omega_ai.openai import DEFAULT_MODEL as OPENAI_MODEL
 from omega_ai.openai import OpenAIProvider
 from omega_coding.approval import Answer, ApprovalPolicy, ApprovalRequest
-from omega_coding.builtin_tools import build_tools
+from omega_coding.builtin_tools import build_tools, collect_guidelines
 from omega_coding.context import measure
 from omega_coding.cost import CostTracker, price_from_env
 from omega_coding.env import USER_CONFIG, find_env_files, load_environment
@@ -54,8 +55,14 @@ _RESULT_PREVIEW = 100
 PROJECT_INSTRUCTIONS_FILE = "OMEGA.md"
 
 
-def _system_prompt(root: Path) -> str:
-    """The standing instructions, with project conventions appended if present.
+def _system_prompt(root: Path, tools: list[Tool]) -> str:
+    """The standing instructions: base prompt, tool guidelines, project conventions.
+
+    The guidelines come from the tools themselves rather than being written out
+    here, which is how "use read_file instead of cat" ends up in the system
+    prompt while living next to `read_file`. Tau does the same thing with
+    `prompt_guidelines`, and the reason is drift: advice kept away from the tool
+    it describes goes stale the first time the tool changes.
 
     Built **once**, at startup, and never regenerated per turn. That is not
     laziness — prompt caching at Tier 3 requires the start of every request to be
@@ -69,12 +76,15 @@ def _system_prompt(root: Path) -> str:
     except OSError:
         extra = ""
 
-    if not extra:
-        return SYSTEM_PROMPT
-    return (
-        f"{SYSTEM_PROMPT}\n\n"
-        f"# Project instructions (from {PROJECT_INSTRUCTIONS_FILE})\n\n{extra}"
-    )
+    sections = [SYSTEM_PROMPT]
+    guidelines = collect_guidelines(tools)
+    if guidelines:
+        sections.append(f"# Tool guidelines\n\n{guidelines}")
+    if extra:
+        sections.append(
+            f"# Project instructions (from {PROJECT_INSTRUCTIONS_FILE})\n\n{extra}"
+        )
+    return "\n\n".join(sections)
 
 
 def _missing_key_message(variable: str, *, extra: str = "") -> str:
@@ -174,6 +184,9 @@ async def _ask_in_terminal(request: ApprovalRequest) -> Answer:
     """
     print(f"\n  omega wants to use {request.tool_name}:")
     print(f"    {_clip(request.summary, 200)}")
+    # What "always" grants differs inside and outside the root, and a keystroke
+    # that means two things should say which one it means before you press it.
+    print(f"    ({request.scope_note})")
 
     while True:
         try:
@@ -242,6 +255,14 @@ def main() -> None:
         help=(
             "Approve tool calls automatically. Does not disable the refuse-outright "
             "list - that is not a prompt you can skip."
+        ),
+    )
+    parser.add_argument(
+        "--confine",
+        action="store_true",
+        help=(
+            "Refuse any file path outside the working directory outright, instead of "
+            "asking. Restores the Tier 2 hard fence."
         ),
     )
     parser.add_argument(
@@ -324,24 +345,35 @@ def main() -> None:
     print("Type 'exit' to quit.\n")
 
     root = Path.cwd()
-    print(f"Working directory: {root} (reads and writes are confined to it)")
+    print(f"Working directory: {root}")
+    if args.confine:
+        print("Paths outside it are refused outright (--confine).")
+    else:
+        print("Paths outside it need your approval, reads included.")
     if args.yes:
-        print("Tool calls are approved automatically (--yes).")
+        # Said plainly, because --yes now means more than it used to. With no
+        # fence on the file tools, this is unprompted read and write access to
+        # the whole disk - the refuse-outright list is all that is left.
+        print(
+            "Tool calls are approved automatically (--yes): no prompts, anywhere on "
+            "this machine. Only the refuse-outright list still applies."
+        )
 
     for path in env_files:
         print(f"Loaded environment from {path}")
 
-    system = _system_prompt(root)
-    if system is not SYSTEM_PROMPT:
+    tools = build_tools(root, confine=args.confine)
+    system = _system_prompt(root, tools)
+    if PROJECT_INSTRUCTIONS_FILE in system:
         print(f"Loaded project instructions from {PROJECT_INSTRUCTIONS_FILE}.")
 
-    tools = build_tools(root)
     tracker = CostTracker(price_from_env())
 
     # Policy arrives as hooks, so the loop knows nothing about approvals or
     # secrets. Swapping either is a change to this composition, nothing else.
     hooks = AgentHooks(
         before_tool_call=ApprovalPolicy(
+            root,
             asker=None if args.yes else _ask_in_terminal,
             auto_approve=args.yes,
         ),

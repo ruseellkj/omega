@@ -64,7 +64,7 @@ neither imports it.
 
 | # | File | Lines | What it is |
 |---|---|---|---|
-| 19 | `paths.py` | 109 | **The fence.** One confinement check, called by every file tool. Three plausible implementations of it are wrong, and the docstring names them. |
+| 19 | `paths.py` | 156 | **One resolver**, called by every file tool. Three plausible implementations are wrong and the docstring names them — still true after Tier 2.5 removed the *refusal*, because judging inside-from-outside is the same problem. |
 | 20 | `file_lock.py` | 57 | One lock per file, keyed on the *resolved* path. |
 | 21 | `truncate.py` | 104 | The output budget: 2,000 lines or 50 KB, keeping the **tail**, because errors are at the end. |
 | 22 | `builtin_tools.py` | 365 | The four tools — read, write, edit, run — sitting behind everything above. |

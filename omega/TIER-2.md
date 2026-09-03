@@ -120,7 +120,7 @@ not block the feature; it identified which part of the file had stopped being th
 | Capability | File | Why it exists |
 |---|---|---|
 | **`edit` tool** | `builtin_tools.py` | Exact-match replace, unique match required. Whole-file writes are hopeless past a few hundred lines |
-| **Path confinement** | `paths.py` | **One** `resolve_within_root`, called by every filesystem tool. Symlinks resolved before checking — failure **#4** |
+| **Path resolution** | `paths.py` | **One** resolver, called by every filesystem tool. Symlinks resolved before the inside/outside verdict — failure **#4**. Tier 2 refused outside paths here; Tier 2.5 moved that to the gate and kept the refusal behind `--confine` |
 | **Per-path write lock** | `file_lock.py` | Keyed on the *resolved* path, shared by `write` and `edit` — failure **#8** |
 | **Approval gate** | `approval.py` | Fills `before_tool_call`. Prompts on shell and writes, remembers the answer, blanket-denies the catastrophes |
 | Secret redaction | `redact.py` | Fills `after_tool_call`. Key-shaped strings never reach the model or a log |
@@ -189,7 +189,7 @@ wrong and that is the thing to fix.
 | Missing | What it costs today | The seam |
 |---|---|---|
 | **Session branching** | You can rewind by reading the JSONL, but not fork and navigate | `parent_id` is already on every entry. Tier 3 adds `tree.py` — `path_to_entry`, cycle detection |
-| **Search tools** — `grep`, `find`, `ls` | It shells out to `rg`, which works but has no output budget of its own | Three more `Tool` objects. `truncate_output()` exists; confinement via `paths.py` exists |
+| **Search tools** — `grep`, `find`, `ls` | It shells out to `rg`, which works but has no output budget of its own | Three more `Tool` objects. `truncate_output()` exists; path resolution via `paths.py` exists |
 | **A real TUI** | Print output can't show a diff, a spinner, or a sidebar | The 10 agent events **are** the UI contract. Tau's whole agent→UI bridge is 99 lines because of this |
 | **Structured logging** | Debugging means reading print output | The same event stream the UI subscribes to. A second listener, not a new mechanism |
 | **Image reading** | Screenshots can't be handed to the model | `types.py` content blocks are a discriminated union; an image block is an addition |
@@ -219,7 +219,7 @@ lands without surgery.
 - **Ctrl-C during an approval prompt does not return immediately.** The prompt reads stdin on a
   worker thread, and a signal cannot interrupt a blocked `input()`. The cancellation is recorded
   and takes effect as soon as the prompt is answered.
-- **Nothing is sandboxed.** Approvals and path confinement are policy, not containment.
+- **Nothing is sandboxed.** The approval gate is policy, not containment — and since Tier 2.5 it is the *only* control on where the file tools reach, `--confine` aside.
 - **The retry wrapper is duplicated between the two adapters.** Same shape in `anthropic.py` and
   `openai.py`, because it is provider-layer *machinery* rather than vendor translation.
   `providers/streaming.py` is the obvious next refactor. Worth noting where the duplication sits:

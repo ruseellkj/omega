@@ -20,7 +20,13 @@ from pathlib import Path
 
 import pytest
 
-from omega_coding.paths import PathOutsideRoot, resolve_within_root
+from omega_coding.paths import (
+    PathOutsideRoot,
+    UnusablePath,
+    is_inside,
+    resolve_path,
+    resolve_within_root,
+)
 
 
 def test_a_plain_relative_path_resolves_under_the_root(tmp_path: Path) -> None:
@@ -138,5 +144,64 @@ def test_it_is_a_tool_error_so_the_loop_reports_it_as_a_result(tmp_path: Path) -
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX path semantics")
 def test_a_path_with_a_null_byte_is_refused(tmp_path: Path) -> None:
-    with pytest.raises(PathOutsideRoot):
+    with pytest.raises(UnusablePath):
         resolve_within_root("ok\x00/../../etc/passwd", tmp_path)
+
+
+# ------------------------------------------ the default: resolve without refusing
+
+
+def test_resolve_path_returns_outside_paths_instead_of_raising(tmp_path: Path) -> None:
+    """Tier 2.5's default. The fence's *judgement* survives; its refusal does not.
+
+    `resolve_path` still has to be exactly as careful as the fence was — the gate
+    downstream asks a human based on what this returns, so a path misjudged as
+    inside the root is a prompt nobody ever sees.
+    """
+    root = tmp_path / "project"
+    root.mkdir()
+    (tmp_path / "secret.txt").write_text("x")
+
+    resolved = resolve_path("../secret.txt", root)
+
+    assert resolved == (tmp_path / "secret.txt").resolve()
+    assert not is_inside(resolved, root)
+
+
+def test_is_inside_is_not_fooled_by_a_shared_prefix(tmp_path: Path) -> None:
+    """Wrong implementation #1, now a property of its own function.
+
+    `/repo-evil` starts with `/repo`. `startswith` was always the tempting
+    one-liner, and it is the reason this is `is_relative_to` and not string work.
+    """
+    root = tmp_path / "repo"
+    root.mkdir()
+    sibling = tmp_path / "repo-evil"
+    sibling.mkdir()
+
+    assert is_inside(root / "src" / "main.py", root)
+    assert is_inside(root, root), "the root is inside itself"
+    assert not is_inside(sibling / "main.py", root)
+
+
+def test_is_inside_agrees_with_the_fence(tmp_path: Path) -> None:
+    """The two must never disagree.
+
+    `--confine` refuses exactly what `is_inside` calls outside. If they drifted,
+    the gate would prompt for something the tool then refused anyway — which is
+    the wart the ordering already has, and it should not get worse.
+    """
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "sub").mkdir()
+
+    cases = ["inside.txt", "sub/deep.txt", "../outside.txt", "sub/../../out.txt", str(tmp_path)]
+    for case in cases:
+        resolved = resolve_path(case, root)
+        inside = is_inside(resolved, root)
+        try:
+            resolve_within_root(case, root)
+            refused = False
+        except PathOutsideRoot:
+            refused = True
+        assert inside is not refused, f"{case}: is_inside={inside} but fence refused={refused}"

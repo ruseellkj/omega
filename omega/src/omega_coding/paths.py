@@ -1,15 +1,33 @@
-"""Path confinement — one function, called by every filesystem tool.
+"""Path resolution — and, optionally, confinement.
 
-Tier 1 could read `~/.ssh/id_rsa` and write anywhere on the disk. This is half
-the fix for beginner failure **#4** (the approval gate in Step 4 is the other
-half, and covers the shell, which no amount of path checking can confine).
+**This file changed shape at Tier 2.5, and the change is worth understanding
+before reading the code.**
 
-`anatomy.md:362` is blunt about the shape: **one place, not per-tool.** A check
-copied into four tools is a check that will be correct in three of them, and the
-fourth is the one the model finds. So the tools do not validate paths; they call
-this and use what comes back.
+At Tier 2 this was a *fence*: every file tool refused any path outside the launch
+directory. That fixed half of beginner failure **#4** — Tier 1 could read
+`~/.ssh/id_rsa` — but it did so by making omega unable to do a large class of
+ordinary work. Neither reference confines paths at all: Pi's `resolveToolPath`
+only makes a path absolute, and Tau's `tools.py` resolves exactly once, to key a
+lock. Claude Code reads outside its project too. All three rely on a **human
+gate** instead.
 
-Three implementations of this idea are wrong in ways that look right:
+So the fence came out, and its job moved to `approval.py`. The rule now:
+
+* **inside the root** — reads are free, writes are asked about (unchanged)
+* **outside the root** — *everything* is asked about, **reads included**
+
+That last clause is the whole reason this is one change and not two. The fence
+was the only thing standing between the model and your private keys on the read
+path, because `read_file` is not gated inside the root and never was. Remove the
+fence without gating outside reads and you get something strictly worse than any
+reference: silent, unprompted, unlogged access to the entire disk.
+
+`resolve_path` is therefore the default, and `resolve_within_root` survives for
+`--confine`, which restores the old hard fence for anyone who wants it.
+
+**The resolution logic below is unchanged, and is still the interesting part.**
+Knowing *whether* a path is outside the root is the same problem as refusing it
+was, and three plausible implementations are wrong:
 
 1. **`str.startswith`** — `/repo-evil` starts with `/repo`.
 2. **Comparing before resolving** — `project/../../etc/passwd` is inside
@@ -20,7 +38,8 @@ Three implementations of this idea are wrong in ways that look right:
    `write_file` exists precisely to create files that are not there, this is the
    common case, not the exotic one.
 
-The third is why this file is longer than a one-liner.
+The third is why this file is longer than a one-liner. It matters *more* now, not
+less: a path misjudged as inside the root is a prompt the user never sees.
 """
 
 from __future__ import annotations
@@ -31,8 +50,16 @@ from pathlib import Path
 from omega_agent.tools import ToolError
 
 
+class UnusablePath(ToolError):
+    """The path cannot be resolved at all — a null byte, a symlink loop.
+
+    Distinct from `PathOutsideRoot`: this is not a policy refusal but a statement
+    that there is nothing here to act on. Raised in both modes.
+    """
+
+
 class PathOutsideRoot(ToolError):
-    """A tool was asked to touch something outside the working directory.
+    """Refused by the hard fence. **Only raised under `--confine`.**
 
     A `ToolError`, so the loop turns it into a tool result the model reads and
     adapts to. A refusal is an observation, not a crash — and one that names the
@@ -40,8 +67,12 @@ class PathOutsideRoot(ToolError):
     """
 
 
-def resolve_within_root(candidate: str | Path, root: Path) -> Path:
-    """Resolve `candidate` and return it, or raise if it lands outside `root`.
+def resolve_path(candidate: str | Path, root: Path) -> Path:
+    """Resolve `candidate` against `root` and return it, wherever it lands.
+
+    The default. Relative paths are taken as relative to `root`; absolute paths
+    are honoured. Nothing is refused for being outside — that is the gate's call
+    now, and it needs the resolved path in order to make it.
 
     The returned path is fully resolved, which makes it the right key for
     `FileLocks` as well: two names for one file must share one lock.
@@ -52,26 +83,45 @@ def resolve_within_root(candidate: str | Path, root: Path) -> Path:
     # swallows the ValueError that a null byte raises and simply returns False,
     # so an embedded null would slip through the walk below unnoticed.
     if "\x00" in str(candidate):
-        raise PathOutsideRoot(f"Refused: {candidate!r} contains a null byte.")
+        raise UnusablePath(f"Refused: {candidate!r} contains a null byte.")
 
     raw = Path(candidate)
     target = raw if raw.is_absolute() else resolved_root / raw
 
     try:
-        resolved = _resolve_through_existing(target)
+        return _resolve_through_existing(target)
     except (OSError, ValueError) as exc:
-        # A null byte, a path too long, a loop of symlinks. Unusable either way,
-        # and refusing is the honest answer.
-        raise PathOutsideRoot(f"Refused: {candidate!r} is not a usable path ({exc}).") from exc
+        # A path too long, a loop of symlinks. Unusable either way, and refusing
+        # is the honest answer.
+        raise UnusablePath(f"Refused: {candidate!r} is not a usable path ({exc}).") from exc
 
-    try:
-        resolved.relative_to(resolved_root)
-    except ValueError as exc:
+
+def is_inside(resolved: Path, root: Path) -> bool:
+    """Is this already-resolved path within `root`?
+
+    Takes a *resolved* path on purpose. Resolving inside a predicate invites a
+    caller to test one path and then act on another, which is bug #2 in the
+    module docstring wearing a different hat.
+    """
+    resolved_root = root.resolve()
+    return resolved == resolved_root or resolved.is_relative_to(resolved_root)
+
+
+def resolve_within_root(candidate: str | Path, root: Path) -> Path:
+    """Resolve, and refuse anything outside `root`. **The `--confine` path.**
+
+    Kept deliberately after the fence stopped being the default. It is the
+    stricter mode for people who want it, it is where the three-wrong-ways lesson
+    above stays under test, and it is what a Tier 3 sandbox profile will be
+    derived from.
+    """
+    resolved = resolve_path(candidate, root)
+    if not is_inside(resolved, root):
         raise PathOutsideRoot(
             f"Refused: {candidate} resolves to {resolved}, which is outside the working "
-            f"directory {resolved_root}. omega only reads and writes inside it."
-        ) from exc
-
+            f"directory {root.resolve()}. omega was started with --confine, which does not "
+            "allow this even with approval."
+        )
     return resolved
 
 

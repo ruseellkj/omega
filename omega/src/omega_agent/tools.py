@@ -68,6 +68,17 @@ class Tool:
     parameters: dict[str, Any]
     execute: ToolExecutor
 
+    #: Lines to add to the **system prompt**, not to `description`. Ported from
+    #: Tau's `prompt_guidelines`, and the distinction is the point: a description
+    #: answers *what does this tool do and how do I call it* — which a model reads
+    #: once it has already chosen the tool. Steering *between* tools ("use
+    #: read_file rather than `cat`") is advice about the whole toolset, and
+    #: belongs where the model reads standing instructions.
+    #:
+    #: A mechanism, not a policy: this package says such text may travel with a
+    #: tool, and says nothing about what it should say. `omega_coding` writes it.
+    guidelines: tuple[str, ...] = ()
+
 
 class ToolError(Exception):
     """Raised by a tool when it cannot do what was asked.
