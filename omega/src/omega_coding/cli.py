@@ -376,6 +376,7 @@ def main() -> None:
             root,
             asker=None if args.yes else _ask_in_terminal,
             auto_approve=args.yes,
+            confine=args.confine,
         ),
         after_tool_call=redacting_hook,
         # Keep failed turns in the transcript, out of the request. The simpler

@@ -212,11 +212,19 @@ class ApprovalPolicy:
         asker: Asker | None = None,
         auto_approve: bool = False,
         read_only: frozenset[str] = READ_ONLY_TOOLS,
+        confine: bool = False,
     ) -> None:
         self._root = root.resolve()
         self._asker = asker
         self._auto_approve = auto_approve
         self._read_only = read_only
+
+        #: Mirrors `build_tools(confine=...)`. The gate has to know, because it
+        #: runs *first*: without this it would prompt for an outside-root path,
+        #: take the yes, and hand the call to a tool that then refuses it. A
+        #: prompt that grants the impossible is worse than no prompt — it teaches
+        #: the user their answer does not matter.
+        self._confine = confine
 
         #: Tools the user said "always" to, for work inside the root. Per session,
         #: in memory. A persisted trust store is a config concern and arrives
@@ -275,6 +283,18 @@ class ApprovalPolicy:
             )
 
         outside = self._outside_path(call)
+
+        if outside is not None and self._confine:
+            # --confine: not a question. Refused here so the user is never asked
+            # to approve something the tool is about to reject anyway.
+            return ToolCallDecision(
+                allowed=False,
+                reason=(
+                    f"Refused: {outside} is outside the working directory {self._root}, and "
+                    "omega was started with --confine. This is not something the user can "
+                    "approve - work inside the working directory instead."
+                ),
+            )
 
         # The narrowed read exemption. Inside the root only — this one clause is
         # what the fence used to be.

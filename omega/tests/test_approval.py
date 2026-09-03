@@ -545,3 +545,36 @@ async def test_an_outside_grant_does_not_reach_into_subdirectories(
         ToolCall(id="3", name="read_file", arguments={"path": str(nested / "deep.txt")})
     )
     assert prompts == 2, "a grant must not descend into subdirectories"
+
+
+async def test_under_confine_an_outside_path_is_refused_not_asked(
+    tmp_path: Path,
+) -> None:
+    """The gate runs first, so it has to know the tool will refuse.
+
+    Without this the sequence is: prompt, user says yes, tool raises anyway. A
+    prompt whose answer changes nothing is worse than silence — it is the fastest
+    way to teach someone that clicking through prompts is safe.
+    """
+    root = tmp_path / "project"
+    root.mkdir()
+    prompts = 0
+
+    async def asker(request: ApprovalRequest) -> Answer:
+        nonlocal prompts
+        prompts += 1
+        return "always"
+
+    policy = ApprovalPolicy(root, asker=asker, confine=True)
+    decision = await policy(
+        ToolCall(id="1", name="read_file", arguments={"path": "../secret.txt"})
+    )
+
+    assert not decision.allowed
+    assert prompts == 0, "--confine must not ask about something it will refuse"
+    assert "--confine" in (decision.reason or ""), "the model needs to know why"
+
+    # Inside the root is unaffected.
+    assert (
+        await policy(ToolCall(id="2", name="read_file", arguments={"path": "in.txt"}))
+    ).allowed
