@@ -194,6 +194,7 @@ wrong and that is the thing to fix.
 | **Structured logging** | Debugging means reading print output | The same event stream the UI subscribes to. A second listener, not a new mechanism |
 | **Image reading** | Screenshots can't be handed to the model | `types.py` content blocks are a discriminated union; an image block is an addition |
 | **Subagents *or* plan mode** | No task decomposition | `before_tool_call` plus the headless driver. A subagent *is* the headless driver called from a tool |
+| **Redaction at the transcript boundary** | Redaction sits on `after_tool_call`, which fires only when a tool *returns a value*. Two paths go around it — see the rough edge below | A **new hook slot** in `harness.py`, firing when a message is recorded rather than when a tool returns. The only row in this table that needs a seam which does not exist yet, and the reason it is Tier 3 rather than a patch |
 
 ### Deliberately not in Tier 3 either
 
@@ -213,6 +214,22 @@ lands without surgery.
   Tier 3 TUI is what makes them reachable; until then they are usable programmatically
   (`harness.queue_steering(...)`) and covered by tests.
 - **The context gauge is chars/4.** It never claims to be exact — only never wildly wrong.
+- **Redaction has two known ways around it, left open on purpose until fixed properly.**
+  `redacting_hook` fills `after_tool_call`, which fires only when a tool hands back a value.
+  1. **A tool that raises skips it.** `tool_runner.py` returns from its `except` block before
+     reaching the hook — and `run_shell` raises on *any* non-zero exit, carrying the command's
+     whole output in the message. So `cat .env` comes back masked and `cat .env; exit 1` does not.
+     Measured, not inferred.
+  2. **The truncation spill file is written unmasked.** `truncate.py:_spill` writes the full raw
+     output to a temp file *inside* the tool, before the hook runs, and does not clean it up — so
+     even a successful, correctly-masked call leaves a plain copy of the secret in `/tmp` and hands
+     the model its path.
+
+  Two patches close these (`tool_runner.py`, `truncate.py`). Neither closes the *category*: the
+  hook is attached to "after a tool returns" when what redaction wants is "before anything is
+  written down", and a third way around will appear the next time a new path to the transcript is
+  added. The Tier 3 row above is the actual fix. Recorded here so the patches are understood as
+  patches.
 - **Tool calls still execute sequentially.** Tau's do too, despite advertising otherwise.
 - **`--fake` still replays a fixed script.** It demonstrates machinery, not intelligence.
 - **Approval memory is per-session.** No persisted trust store; that arrives with config.
