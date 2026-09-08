@@ -22,6 +22,8 @@ from __future__ import annotations
 import tempfile
 from dataclasses import dataclass
 
+from omega_coding.redact import redact
+
 MAX_LINES = 2_000
 MAX_BYTES = 50 * 1024
 
@@ -44,11 +46,28 @@ def _format_size(num_bytes: int) -> str:
 
 
 def _spill(text: str, label: str) -> str:
-    """Write the full output somewhere the model can read it back."""
+    """Write the full output somewhere the model can read it back — **masked**.
+
+    The masking is not decoration. This file is written *inside* the tool, which
+    is before `after_tool_call` runs, so at Tier 2 a call whose result was
+    correctly masked still left a plain copy of the secret here — and handed the
+    model the path to it. Worse than the in-transcript leak in one respect: a
+    transcript is at least ephemeral, and nothing cleans this file up, so it
+    outlives the session that produced it.
+
+    Masked *here* rather than by having callers pass a sanitiser in. There is one
+    `_spill`, and one place cannot be forgotten; a sanitiser threaded through
+    every caller has the same shape as a confinement check copied into four
+    tools, which `paths.py` argues against at length. The cost is that an
+    output-budget module now knows secrets exist. Worth paying: what this writes
+    is a transcript by another name, and the rule for transcripts is that
+    credentials stay out of them.
+    """
+    cleaned, _found = redact(text)
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=f"-{label}.txt", prefix="omega-", delete=False, encoding="utf-8"
     ) as handle:
-        handle.write(text)
+        handle.write(cleaned)
         path = handle.name
     return path
 

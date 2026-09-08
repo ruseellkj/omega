@@ -13,6 +13,8 @@ Filling `after_tool_call` means the loop gains nothing from it, same as the gate
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from omega_coding.redact import redact
@@ -139,3 +141,96 @@ def test_an_indented_secret_is_masked_and_keeps_its_indentation() -> None:
     assert "supersecretvalue" not in cleaned
     assert "    api_key: [redacted]" in cleaned
     assert found
+
+
+# --------------------------------------------------- the paths that went around it
+#
+# Both of these were open until Tier 2.5, and both were found by *running* the
+# thing rather than reading it. The lesson is in the test above:
+# `test_a_leaked_key_never_reaches_the_transcript` goes end to end through the
+# real harness, the real loop and the real hook — using a fake tool that
+# `return`s. A tool that cannot fail can only exercise the half of the code that
+# succeeds, so that test read as full coverage while covering one of two exits.
+
+
+async def test_a_tool_that_raises_is_masked_too() -> None:
+    """The first way around: an exception leaves before the hook is reached.
+
+    `tool_runner` returned from its `except` block, so everything after it —
+    `after_tool_call` included — was skipped. Which matters because a failing
+    command's output is exactly what ends up pasted into a bug report.
+    """
+    from typing import Any
+
+    from omega_agent.hooks import AgentHooks
+    from omega_agent.tool_runner import execute_tool_call
+    from omega_agent.tools import Tool, ToolError, ToolResult
+    from omega_agent.types import ToolCall
+    from omega_coding.redact import redacting_hook
+
+    async def explodes(arguments: dict[str, Any], signal: Any) -> ToolResult:
+        raise ToolError("failed while reading ANTHROPIC_API_KEY=sk-ant-api03-LEAKEDLEAKEDLEAK")
+
+    tool = Tool(name="boom", description="d", parameters={"type": "object"}, execute=explodes)
+    message = await execute_tool_call(
+        ToolCall(id="1", name="boom", arguments={}),
+        {"boom": tool},
+        AgentHooks(after_tool_call=redacting_hook),
+        None,
+    )
+
+    assert message.is_error, "still an error - masking must not disguise that"
+    assert "sk-ant-api03-LEAKED" not in message.text
+    assert "ANTHROPIC_API_KEY" in message.text, "the name survives; only the value goes"
+
+
+async def test_a_shell_command_that_exits_non_zero_is_masked(tmp_path: Path) -> None:
+    """The same hole, through the tool that actually reaches it in practice.
+
+    `run_shell` treats any non-zero exit as a failure and raises, carrying the
+    command's whole output in the message. So the only difference between a
+    masked result and a leaked one used to be the exit code.
+    """
+    from omega_agent.hooks import AgentHooks
+    from omega_agent.tool_runner import execute_tool_call
+    from omega_agent.types import ToolCall
+    from omega_coding.builtin_tools import build_tools
+    from omega_coding.redact import redacting_hook
+
+    secret = "sk-ant-" + "C" * 24
+    tools = {tool.name: tool for tool in build_tools(tmp_path)}
+    hooks = AgentHooks(after_tool_call=redacting_hook)
+
+    async def run(command: str) -> str:
+        message = await execute_tool_call(
+            ToolCall(id="1", name="run_shell", arguments={"command": command}),
+            tools,
+            hooks,
+            None,
+        )
+        return message.text
+
+    assert secret not in await run(f"echo {secret}"), "the success path was already fine"
+    assert secret not in await run(f"echo {secret}; exit 1"), "the failure path was not"
+
+
+async def test_the_spilled_output_file_is_masked_on_disk() -> None:
+    """The second way around, and the one that outlives the session.
+
+    `truncate_output` writes the full output to a temp file so the model can read
+    past the budget — and it does that *inside* the tool, before the hook runs at
+    all. So a perfectly masked result could still leave a plain copy of the key
+    on disk with its path handed to the model, and nothing tidies that file away.
+    """
+    from omega_coding.truncate import MAX_LINES, truncate_output
+
+    secret = "sk-ant-" + "D" * 24
+    padded = "\n".join([secret] + [f"line {n}" for n in range(MAX_LINES + 50)])
+
+    body, truncation = truncate_output(padded, label="test")
+
+    assert truncation.truncated and truncation.full_output_path is not None
+    assert secret not in body, "the model's copy"
+    on_disk = Path(truncation.full_output_path).read_text(encoding="utf-8")
+    assert secret not in on_disk, "the copy left behind on disk"
+    assert "[redacted" in on_disk, "masked, not merely dropped by truncation"

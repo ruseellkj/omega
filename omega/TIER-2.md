@@ -214,22 +214,27 @@ lands without surgery.
   Tier 3 TUI is what makes them reachable; until then they are usable programmatically
   (`harness.queue_steering(...)`) and covered by tests.
 - **The context gauge is chars/4.** It never claims to be exact — only never wildly wrong.
-- **Redaction has two known ways around it, left open on purpose until fixed properly.**
+- **Redaction had two ways around it. Both are patched; the shape that produced them is not.**
   `redacting_hook` fills `after_tool_call`, which fires only when a tool hands back a value.
-  1. **A tool that raises skips it.** `tool_runner.py` returns from its `except` block before
-     reaching the hook — and `run_shell` raises on *any* non-zero exit, carrying the command's
-     whole output in the message. So `cat .env` comes back masked and `cat .env; exit 1` does not.
-     Measured, not inferred.
-  2. **The truncation spill file is written unmasked.** `truncate.py:_spill` writes the full raw
-     output to a temp file *inside* the tool, before the hook runs, and does not clean it up — so
-     even a successful, correctly-masked call leaves a plain copy of the secret in `/tmp` and hands
-     the model its path.
+  1. ~~A tool that raises skips it.~~ **Fixed.** `tool_runner.py` returned from its `except` block
+     before reaching the hook — and `run_shell` raises on *any* non-zero exit, carrying the
+     command's whole output in the message, so `cat .env` came back masked and `cat .env; exit 1`
+     did not. Every exit from `execute_tool_call` now passes through the hook.
+  2. ~~The truncation spill file is written unmasked.~~ **Fixed.** `truncate.py:_spill` wrote the
+     full raw output to a temp file *inside* the tool, before the hook ran, and nothing cleans that
+     file up — so even a correctly-masked result left a plain copy on disk with its path handed to
+     the model. `_spill` masks what it writes.
 
-  Two patches close these (`tool_runner.py`, `truncate.py`). Neither closes the *category*: the
-  hook is attached to "after a tool returns" when what redaction wants is "before anything is
-  written down", and a third way around will appear the next time a new path to the transcript is
-  added. The Tier 3 row above is the actual fix. Recorded here so the patches are understood as
-  patches.
+  Both were found by *running* the code, not reading it, and the reason nothing caught them earlier
+  is worth keeping: `test_a_leaked_key_never_reaches_the_transcript` goes end to end through the
+  real harness, loop and hook — with a fake tool that `return`s and therefore cannot fail. It read
+  as full coverage while exercising one of two exits.
+
+  **The category is still open.** The hook is attached to "after a tool returns" when what
+  redaction wants is "before anything is written down", so a third way around will appear the next
+  time a new path to the transcript is added — and a hook reached from the error path cannot even
+  be told it is an error, since `ToolResult` carries no such flag. The Tier 3 row above is the
+  actual fix. These two are patches, and are commented as patches in both files.
 - **Tool calls still execute sequentially.** Tau's do too, despite advertising otherwise.
 - **`--fake` still replays a fixed script.** It demonstrates machinery, not intelligence.
 - **Approval memory is per-session.** No persisted trust store; that arrives with config.

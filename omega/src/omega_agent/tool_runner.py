@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 
 from omega_agent.hooks import AgentHooks
-from omega_agent.tools import Tool
+from omega_agent.tools import Tool, ToolResult
 from omega_agent.types import CancellationToken, ToolCall, ToolResultMessage
 
 
@@ -41,15 +41,17 @@ async def execute_tool_call(
     """
     tool = tool_by_name.get(tool_request.name)
     if tool is None:
-        return _error_result(tool_request, f"Tool {tool_request.name} not found")
+        return await _error_result(tool_request, f"Tool {tool_request.name} not found", hooks)
 
     if signal is not None and signal.is_cancelled():
-        return _error_result(tool_request, "Operation aborted")
+        return await _error_result(tool_request, "Operation aborted", hooks)
 
     if hooks.before_tool_call is not None:
         decision = await hooks.before_tool_call(tool_request)
         if not decision.allowed:
-            return _error_result(tool_request, decision.reason or "Tool call denied")
+            return await _error_result(
+                tool_request, decision.reason or "Tool call denied", hooks
+            )
 
     try:
         result = await tool.execute(tool_request.arguments, signal)
@@ -61,7 +63,7 @@ async def execute_tool_call(
     except Exception as exc:  # noqa: BLE001 - tools are an isolation boundary
         # A tool is third-party code touching the filesystem and the network. If
         # a crashing tool crashed the agent, one bad tool would end every session.
-        return _error_result(tool_request, str(exc) or exc.__class__.__name__)
+        return await _error_result(tool_request, str(exc) or exc.__class__.__name__, hooks)
 
     if hooks.after_tool_call is not None:
         result = await hooks.after_tool_call(tool_request, result)
@@ -74,7 +76,38 @@ async def execute_tool_call(
     )
 
 
-def _error_result(tool_request: ToolCall, message: str) -> ToolResultMessage:
+async def _error_result(
+    tool_request: ToolCall, message: str, hooks: AgentHooks
+) -> ToolResultMessage:
+    """A failure, through the same `after_tool_call` that a success goes through.
+
+    **This closes a real leak, and the reason is worth stating.** An error *is* a
+    result: it goes into the transcript, into the next request to the provider,
+    and onto disk, exactly as a success does. But `after_tool_call` used to run
+    only on the path below, so anything leaving through here skipped it — and
+    `run_shell` raises on *any* non-zero exit, carrying the command's whole
+    output in the message. The only thing separating a masked result from a
+    leaked one was the exit code, which is the wrong thing to depend on: failing
+    commands are precisely the ones whose output gets pasted into a bug report.
+
+    So every exit from `execute_tool_call` now passes through the hook, not just
+    the one that happens to return a value.
+
+    A hook reached from here cannot be told this was a failure — `ToolResult`
+    carries no error flag — which is fine for redaction, a pure text transform,
+    and is the limit of what a patch can do. Attaching redaction to "before
+    anything is recorded" rather than "after a tool returns" is the real fix, and
+    it needs a seam that does not exist yet. See `TIER-2.md`.
+    """
+    if hooks.after_tool_call is not None:
+        # `ToolResult` accepts a bare string and stores the list shape - see its
+        # `_wrap_bare_string` validator. The ignore matches every other call site.
+        transformed = await hooks.after_tool_call(
+            tool_request,
+            ToolResult(content=message),  # type: ignore[arg-type]
+        )
+        message = transformed.text
+
     return ToolResultMessage(
         tool_call_id=tool_request.id,
         tool_name=tool_request.name,
