@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-from omega_coding.truncate import MAX_BYTES, MAX_LINES, truncate_output
+import pytest
+
+from omega_coding.truncate import (
+    MAX_BYTES,
+    MAX_LINES,
+    sweep_old_spills,
+    truncate_output,
+)
 
 
 def test_short_output_is_untouched_and_writes_no_file() -> None:
@@ -52,3 +60,60 @@ def test_byte_budget_applies_to_few_very_long_lines() -> None:
     assert info.truncated is True
     assert info.truncated_by == "bytes"
     assert len(body.encode("utf-8")) < len(text.encode("utf-8"))
+
+
+# ------------------------------------------------- spill files do not pile up
+
+
+def test_old_spill_files_are_swept(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The leak this fixes was found on a real machine, not in a test.
+
+    `_spill` writes with `delete=False` on purpose — the path is handed to the
+    model and has to outlive the call. Nothing tidied them afterwards, so a
+    working laptop had spill files from three separate days, up to 50KB each.
+    """
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+
+    fresh = tmp_path / "omega-aaaa-output.txt"
+    stale = tmp_path / "omega-bbbb-output.txt"
+    fresh.write_text("recent")
+    stale.write_text("ancient")
+    os.utime(stale, (0, 0))  # epoch: unambiguously old
+
+    swept = sweep_old_spills()
+
+    assert swept == 1
+    assert fresh.exists(), "a file from this week is still useful"
+    assert not stale.exists()
+
+
+def test_the_sweep_only_touches_omega_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The prefix is what makes tidying a shared temp directory safe.
+
+    The temp directory belongs to the whole machine. A sweep matching `*.txt`
+    would be clearing other programs' files, which is a far worse bug than the
+    one it fixes.
+    """
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+
+    someone_else = tmp_path / "important-backup.txt"
+    also_not_ours = tmp_path / "notomega-data.txt"
+    ours = tmp_path / "omega-cccc-shell.txt"
+    for path in (someone_else, also_not_ours, ours):
+        path.write_text("x")
+        os.utime(path, (0, 0))
+
+    assert sweep_old_spills() == 1
+    assert someone_else.exists() and also_not_ours.exists()
+    assert not ours.exists()
+
+
+def test_sweeping_a_missing_directory_does_not_raise(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Startup must survive a temp directory it cannot fully control."""
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path / "nope"))
+
+    assert sweep_old_spills() == 0

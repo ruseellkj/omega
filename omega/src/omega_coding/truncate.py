@@ -20,7 +20,9 @@ Limits match Pi and Tau, which arrived at the same numbers independently.
 from __future__ import annotations
 
 import tempfile
+import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from omega_coding.redact import redact
 
@@ -70,6 +72,56 @@ def _spill(text: str, label: str) -> str:
         handle.write(cleaned)
         path = handle.name
     return path
+
+
+#: How long a spill file is worth keeping. Long enough that a path handed to the
+#: model on Monday still resolves on Tuesday; short enough that the directory does
+#: not grow without bound.
+SPILL_MAX_AGE_DAYS = 7
+
+#: Every spill file starts with this, which is what makes sweeping them safe: the
+#: pattern cannot match anything omega did not write.
+_SPILL_PREFIX = "omega-"
+
+
+def sweep_old_spills(
+    *, max_age_days: float = SPILL_MAX_AGE_DAYS, now: float | None = None
+) -> int:
+    """Delete spill files older than `max_age_days`. Returns how many went.
+
+    **Fixing a real leak.** `_spill` writes with `delete=False`, because the whole
+    point is that the path outlives the call — the model is handed it and may read
+    it turns later. Nothing deleted them afterwards, so they accumulated forever:
+    a real machine had files from three separate days sitting in the temp
+    directory, each up to 50 KB of command output.
+
+    Deliberately age-based rather than session-scoped. A spill file has no session
+    id — `truncate_output` is called from inside a tool and never learns one — and
+    plumbing one down through the tool factory to reach it would couple output
+    budgets to session management for no gain. Age is the property that actually
+    matters: nobody reads Tuesday's truncated build log.
+
+    Failures are swallowed per file. A sweep that cannot delete something (a
+    permission, a race with a second omega) must not stop omega starting.
+    """
+    directory = Path(tempfile.gettempdir())
+    cutoff = (time.time() if now is None else now) - max_age_days * 86_400
+    removed = 0
+
+    try:
+        candidates = list(directory.glob(f"{_SPILL_PREFIX}*.txt"))
+    except OSError:
+        return 0
+
+    for path in candidates:
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
+                removed += 1
+        except OSError:
+            continue
+
+    return removed
 
 
 def truncate_output(text: str, *, label: str = "output") -> tuple[str, Truncation]:
