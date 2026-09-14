@@ -26,65 +26,23 @@ from omega_agent.hooks import AgentHooks
 from omega_agent.loop import DEFAULT_MAX_TURNS
 from omega_agent.provider import ModelProvider
 from omega_agent.session import JsonlSessionStore
-from omega_agent.tools import Tool
 from omega_ai.anthropic import DEFAULT_MODEL as ANTHROPIC_MODEL
 from omega_ai.anthropic import AnthropicProvider
 from omega_ai.fake import FakeProvider, text_turn, tool_turn
 from omega_ai.openai import DEFAULT_MODEL as OPENAI_MODEL
 from omega_ai.openai import OpenAIProvider
 from omega_coding.approval import Answer, ApprovalPolicy, ApprovalRequest
-from omega_coding.builtin_tools import build_tools, collect_guidelines
+from omega_coding.builtin_tools import build_tools
 from omega_coding.context import measure
 from omega_coding.cost import CostTracker, price_from_env
 from omega_coding.env import USER_CONFIG, find_env_files, load_environment
 from omega_coding.history import drop_empty_failed_turns
 from omega_coding.redact import redacting_hook
-
-SYSTEM_PROMPT = """You are omega, a terminal coding agent. Use the tools to inspect and edit files.
-
-When asked to perform a coding task:
-1. Inspect the codebase before changing it.
-2. Make the change with write_file, or run commands with run_shell.
-3. Verify your work before reporting that you are done."""
+from omega_coding.system_prompt import PROJECT_INSTRUCTIONS_FILE, build_system_prompt
+from omega_coding.truncate import sweep_old_spills
 
 _ARG_PREVIEW = 80
 _RESULT_PREVIEW = 100
-
-#: Project conventions, read once at startup. "Use uv, not pip" belongs in a file
-#: rather than in every prompt.
-PROJECT_INSTRUCTIONS_FILE = "OMEGA.md"
-
-
-def _system_prompt(root: Path, tools: list[Tool]) -> str:
-    """The standing instructions: base prompt, tool guidelines, project conventions.
-
-    The guidelines come from the tools themselves rather than being written out
-    here, which is how "use read_file instead of cat" ends up in the system
-    prompt while living next to `read_file`. Tau does the same thing with
-    `prompt_guidelines`, and the reason is drift: advice kept away from the tool
-    it describes goes stale the first time the tool changes.
-
-    Built **once**, at startup, and never regenerated per turn. That is not
-    laziness — prompt caching at Tier 3 requires the start of every request to be
-    byte-identical between calls, and a system prompt rebuilt each turn (with a
-    timestamp in it, say) silently destroys the cache. Cheaper to get the habit
-    right now than to debug a mysteriously expensive agent later.
-    """
-    path = root / PROJECT_INSTRUCTIONS_FILE
-    try:
-        extra = path.read_text(encoding="utf-8").strip() if path.is_file() else ""
-    except OSError:
-        extra = ""
-
-    sections = [SYSTEM_PROMPT]
-    guidelines = collect_guidelines(tools)
-    if guidelines:
-        sections.append(f"# Tool guidelines\n\n{guidelines}")
-    if extra:
-        sections.append(
-            f"# Project instructions (from {PROJECT_INSTRUCTIONS_FILE})\n\n{extra}"
-        )
-    return "\n\n".join(sections)
 
 
 def _missing_key_message(variable: str, *, extra: str = "") -> str:
@@ -265,15 +223,26 @@ def main() -> None:
             "asking. Restores the Tier 2 hard fence."
         ),
     )
+    # Named to match Claude Code exactly, because muscle memory is a real cost:
+    # `--continue` picks up where you were, `--resume <id>` goes to a named one.
+    # Tier 2 had these the other way round, which meant `--resume` did what every
+    # other agent calls `--continue`.
     parser.add_argument(
-        "--resume",
+        "-c",
+        "--continue",
+        dest="continue_latest",
         action="store_true",
-        help="Continue the most recent session in this directory.",
+        help="Continue the most recent session for this project.",
     )
     parser.add_argument(
-        "--session",
+        "--resume",
         metavar="ID",
-        help="Continue a specific session by id.",
+        help="Resume a specific session by id. Use --sessions to list them.",
+    )
+    parser.add_argument(
+        "--sessions",
+        action="store_true",
+        help="List saved sessions for this project and exit.",
     )
     parser.add_argument(
         "--no-save",
@@ -362,8 +331,13 @@ def main() -> None:
     for path in env_files:
         print(f"Loaded environment from {path}")
 
+    # Old truncation spill files, from this run or any other. Swept at startup
+    # rather than at exit, because the run that leaves them is the one that
+    # crashed - an exit-time sweep would miss exactly the cases that matter.
+    sweep_old_spills()
+
     tools = build_tools(root, confine=args.confine)
-    system = _system_prompt(root, tools)
+    system = build_system_prompt(root, tools)
     if PROJECT_INSTRUCTIONS_FILE in system:
         print(f"Loaded project instructions from {PROJECT_INSTRUCTIONS_FILE}.")
 
@@ -401,12 +375,27 @@ def main() -> None:
 
     harness.add_listener(tracker.observe)
 
-    if args.session or args.resume:
+    if args.sessions:
+        if store is None:
+            sys.exit("--sessions needs a session store; remove --no-save.")
+        rows = store.list_sessions()
+        if not rows:
+            print(f"No saved sessions for {root}.")
+        else:
+            print(f"Sessions for {root} ({store.directory}):\n")
+            for row in rows:
+                when = row.modified.astimezone().strftime("%Y-%m-%d %H:%M")
+                summary = row.first_prompt or "(no prompt recorded)"
+                print(f"  {row.session_id}  {when}  {row.messages:>4} msgs  {summary}")
+            print("\nResume one with: omega --resume <id>")
+        return
+
+    if args.resume or args.continue_latest:
         if store is None:
             sys.exit("Cannot resume with --no-save.")
-        session_id = args.session or store.latest_session_id()
+        session_id = args.resume or store.latest_session_id()
         if session_id is None:
-            print("No previous session found in this directory - starting a new one.")
+            print("No previous session found for this project - starting a new one.")
         else:
             restored = harness.resume(session_id)
             print(f"Resumed {session_id} ({restored} messages).")
@@ -420,7 +409,7 @@ def main() -> None:
 
         if prompt.strip().lower() in {"exit", "quit"}:
             if harness.session_id is not None:
-                print(f"Session saved: {harness.session_id} (resume with `omega --resume`)")
+                print(f"Session saved: {harness.session_id} (continue with `omega -c`)")
             break
         if not prompt.strip():
             continue

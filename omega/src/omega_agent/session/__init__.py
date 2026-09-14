@@ -13,15 +13,22 @@ from omega_agent.session.entries import (
     SessionRecord,
 )
 from omega_agent.session.jsonl import append_record, read_records
-from omega_agent.session.store import JsonlSessionStore, SessionStore
+from omega_agent.session.store import (
+    JsonlSessionStore,
+    SessionInfo,
+    SessionStore,
+    project_key,
+)
 
 __all__ = [
     "SCHEMA_VERSION",
     "JsonlSessionStore",
+    "SessionInfo",
     "SessionEntry",
     "SessionHeader",
     "SessionRecord",
     "SessionStore",
+    "project_key",
     "append_record",
     "read_records",
 ]
