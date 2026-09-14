@@ -39,3 +39,6 @@ SESSION-TRANSCRIPT.md
 # Commits recorded by the pre-push hook, waiting to be written to the Notion
 # sync log. Local bookkeeping, cleared once synced.
 .omega-sync-pending.jsonl
+
+# Claude Code worktrees — local scratch, never committed
+.claude/worktrees/

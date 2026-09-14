@@ -109,6 +109,7 @@ explains, not front to back.
 | `file_lock.py` | `01-teardown/03-coding-tools.md` §4.2 |
 | `paths.py`, `approval.py`, `redact.py` | `00-concepts/security.md` §3–5 |
 | `session/` | `01-teardown/03b-context-sessions-compaction.md` |
+| `session/`, `retry.py`, `file_lock.py`, `cost.py` — or "how do Pi/Tau/Claude Code do this?" | `00-concepts/state-and-delegation.md` — persistence, retry, locking, subagents and multi-session, compared across all four |
 | anything, when the layering is unclear | `03-architecture/04-boundaries-and-layout.md` |
 
 ---
