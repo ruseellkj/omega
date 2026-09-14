@@ -168,30 +168,6 @@ async def _terminate(process: asyncio.subprocess.Process, pending: asyncio.Task[
         await process.wait()
 
 
-def collect_guidelines(tools: list[Tool]) -> str:
-    """Every tool's `guidelines`, de-duplicated, as markdown bullets.
-
-    Tau's `collect_prompt_guidelines` with the conditional logic left out. Tau
-    varies its advice by which tools are present — "use bash for ls/grep/find"
-    when it has no dedicated search tools, "prefer grep/find/ls over bash" when
-    it does. omega has four tools and no such fork, so this is a loop and a set.
-
-    Order follows the tool list, so the prompt is byte-identical between runs.
-    That matters for the same reason `_system_prompt` is built once: prompt
-    caching at Tier 3 needs a stable prefix, and a `set` iterated directly would
-    reorder it between processes.
-    """
-    seen: set[str] = set()
-    lines: list[str] = []
-    for tool in tools:
-        for guideline in tool.guidelines:
-            text = guideline.strip()
-            if text and text not in seen:
-                seen.add(text)
-                lines.append(f"- {text}")
-    return "\n".join(lines)
-
-
 def build_tools(
     root: Path | None = None,
     *,

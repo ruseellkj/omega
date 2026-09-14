@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from omega_agent.tools import Tool, ToolError
-from omega_coding.builtin_tools import build_tools, collect_guidelines
+from omega_coding.builtin_tools import build_tools
 from omega_coding.paths import PathOutsideRoot
 
 
@@ -309,33 +309,3 @@ def test_every_tool_says_something_about_paths_or_scope(tmp_path: Path) -> None:
     assert "not restricted" in by_name["run_shell"].description, (
         "the shell's lack of confinement is the one thing it must admit"
     )
-
-
-def test_guidelines_reach_the_system_prompt_not_the_description(tmp_path: Path) -> None:
-    """Tau's `prompt_guidelines`, ported. The `cat` line is the one that matters.
-
-    It is what stops a model shelling out to read a file — which would route
-    around the gate's oversight of the file tools entirely — and it can only work
-    from the system prompt, because by the time a description is read the tool
-    has been chosen.
-    """
-    tools = build_tools(tmp_path)
-    collected = collect_guidelines(tools)
-
-    assert "instead of cat" in collected
-    assert all(g not in t.description for t in tools for g in t.guidelines)
-
-
-def test_collect_guidelines_is_stable_and_deduplicated(tmp_path: Path) -> None:
-    """Byte-identical between runs, because prompt caching needs a stable prefix.
-
-    A `set` iterated directly would reorder between processes and quietly cost
-    money at Tier 3 — the same trap `_system_prompt` avoids by being built once.
-    """
-    tools = build_tools(tmp_path)
-
-    assert collect_guidelines(tools) == collect_guidelines(build_tools(tmp_path))
-
-    lines = collect_guidelines(tools).splitlines()
-    assert len(lines) == len(set(lines)), "a guideline was repeated"
-    assert collect_guidelines([]) == "", "no tools, no section"
