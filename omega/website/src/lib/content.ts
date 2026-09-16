@@ -13,7 +13,7 @@
 export const site = {
   name: "omega",
   eyebrow: "A terminal coding agent",
-  /** The argument, not the description. Both numbers are measured. */
+  /** The argument, not the description. The figure is measured, and has not moved. */
   headline: "The loop is 190 lines.",
   headlineRest: "Everything else grew around it.",
   tagline: "A terminal coding agent, built from scratch in layers.",

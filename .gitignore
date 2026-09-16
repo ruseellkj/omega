@@ -42,3 +42,7 @@ SESSION-TRANSCRIPT.md
 
 # Claude Code worktrees — local scratch, never committed
 .claude/worktrees/
+
+# Playwright MCP screenshots and page snapshots
+.playwright-mcp/
+docs-arrow.png

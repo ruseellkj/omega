@@ -28,11 +28,11 @@ const FAILURES = [
 
 const COMPARISON = [
   { aspect: "Lines", spike: "70", layered: "6,247" },
-  { aspect: "Files", spike: "1", layered: "32" },
+  { aspect: "Files", spike: "1", layered: "38" },
   { aspect: "The loop", spike: "the whole file", layered: "190 lines" },
   { aspect: "Add a provider", spike: "edit six places", layered: "add one file" },
   { aspect: "Interrupt it", spike: "transcript is dead", layered: "repaired on resume" },
-  { aspect: "Tests", spike: "none", layered: "289, offline" },
+  { aspect: "Tests", spike: "none", layered: "395, offline" },
 ] as const;
 
 const SECTIONS = [
