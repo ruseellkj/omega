@@ -72,6 +72,7 @@ from omega_ai.retry import (
     DEFAULT_RETRY,
     RetryPolicy,
     delay_for,
+    is_permanent_quota_failure,
     is_retryable,
     retry_after_of,
 )
@@ -85,6 +86,36 @@ AuthResolver = Callable[[], Awaitable[str]]
 
 
 # ------------------------------------------------------------------ outbound
+
+#: The current OpenAI name for "stop after N tokens". `max_tokens` is the older
+#: spelling: **measured against the live API, gpt-5 rejects it outright while
+#: gpt-4o-mini accepts either.** So the newer name is the default, and the older
+#: one is what a server falls back to if it has never heard of the new one —
+#: which matters because this adapter also speaks to Groq, Together, Ollama and
+#: vLLM through `--base-url`.
+TOKEN_LIMIT_KEY = "max_completion_tokens"
+_LEGACY_TOKEN_LIMIT_KEY = "max_tokens"
+
+
+def _other_token_limit_key(current: str, exc: APIStatusError) -> str | None:
+    """The other spelling, if that is what this failure is about. Else None.
+
+    Narrow on purpose. A 400 is normally fatal and stays fatal — this is the one
+    case where the request is fine and only the field name is wrong, so retrying
+    with the other name is the difference between working and not. Anything else
+    is re-raised untouched.
+    """
+    detail = str(exc).lower()
+    if getattr(exc, "status_code", None) != 400:
+        return None
+    if current.lower() not in detail:
+        return None
+    if "unsupported" not in detail and "not supported" not in detail:
+        return None
+    return (
+        _LEGACY_TOKEN_LIMIT_KEY if current == TOKEN_LIMIT_KEY else TOKEN_LIMIT_KEY
+    )
+
 
 def to_openai_tools(tools: list[Tool]) -> list[dict[str, Any]]:
     return [
@@ -188,6 +219,9 @@ class OpenAIProvider:
         retry: RetryPolicy = DEFAULT_RETRY,
     ) -> None:
         self._max_tokens = max_tokens
+        #: Swapped once, permanently, if a server rejects the name. See
+        #: `_other_token_limit_key`.
+        self._token_limit_key = TOKEN_LIMIT_KEY
         self._retry = retry
         self._auth = auth
         self._client = client or AsyncOpenAI(
@@ -291,7 +325,7 @@ class OpenAIProvider:
             "model": model,
             "messages": to_openai_messages(system, messages),
             "stream": True,
-            "max_tokens": self._max_tokens,
+            self._token_limit_key: self._max_tokens,
             # Without this, a streamed response reports no usage at all and the
             # cost tracker silently counts zero.
             "stream_options": {"include_usage": True},
@@ -299,122 +333,144 @@ class OpenAIProvider:
         if tools:
             request["tools"] = to_openai_tools(tools)
 
-        stream = await self._client.chat.completions.create(**cast("Any", request))
+        try:
+            stream = await self._client.chat.completions.create(**cast("Any", request))
+        except APIStatusError as exc:
+            # One wire format, two spellings of the same field. Measured against
+            # the live API: gpt-5 rejects `max_tokens`, gpt-4o-mini accepts both.
+            alternate = _other_token_limit_key(self._token_limit_key, exc)
+            if alternate is None:
+                raise
+            request.pop(self._token_limit_key)
+            request[alternate] = self._max_tokens
+            # Remembered, so a server costs at most one rejected request per
+            # session rather than one per turn.
+            self._token_limit_key = alternate
+            stream = await self._client.chat.completions.create(**cast("Any", request))
 
-        # After the request is established, so a connection failure leaves nothing
-        # emitted and the retry in `_stream` is still allowed to fire.
-        yield AssistantStartEvent(partial=partial.model_copy(deep=True))
+        # **Closed deterministically, not by the garbage collector.** The
+        # loop below `return`s early on cancellation, and the consumer stops
+        # iterating as soon as a terminal event arrives - both abandon the
+        # stream mid-flight. Left to GC, httpcore is closed at an arbitrary
+        # moment and throws GeneratorExit into a suspended generator, which
+        # surfaces as a `generator didn't stop after athrow()` traceback
+        # printed over the model's answer. `anthropic.py:292` already used
+        # `async with`; this brings the two adapters back into line.
+        async with stream:
+            # After the request is established, so a connection failure leaves nothing
+            # emitted and the retry in `_stream` is still allowed to fire.
+            yield AssistantStartEvent(partial=partial.model_copy(deep=True))
 
-        text_index: int | None = None
-        # OpenAI's tool_call index is its own sequence, unrelated to position in
-        # our content list, so the two have to be mapped rather than assumed equal.
-        our_index_of: dict[int, int] = {}
-        # Keyed by *our* content index, so reassembling the JSON at the end needs
-        # no reverse lookup through the map above.
-        tool_json: dict[int, str] = {}
-        finish: str | None = None
+            text_index: int | None = None
+            # OpenAI's tool_call index is its own sequence, unrelated to position in
+            # our content list, so the two have to be mapped rather than assumed equal.
+            our_index_of: dict[int, int] = {}
+            # Keyed by *our* content index, so reassembling the JSON at the end needs
+            # no reverse lookup through the map above.
+            tool_json: dict[int, str] = {}
+            finish: str | None = None
 
-        async for chunk in stream:
-            if signal is not None and signal.is_cancelled():
-                yield AssistantErrorEvent(
-                    reason="aborted",
-                    error=self._error_message(partial, "Cancelled", reason="aborted"),
-                )
-                return
-
-            if chunk.usage is not None:
-                partial.usage = Usage(
-                    input=chunk.usage.prompt_tokens, output=chunk.usage.completion_tokens
-                )
-
-            if not chunk.choices:
-                # A usage-only final chunk. Legal, and easy to crash on.
-                continue
-
-            choice = chunk.choices[0]
-            if choice.finish_reason:
-                finish = choice.finish_reason
-
-            delta = choice.delta
-            if delta is None:
-                continue
-
-            if delta.content:
-                if text_index is None:
-                    text_index = len(partial.content)
-                    partial.content.append(TextContent(text=""))
-                    yield TextStartEvent(
-                        content_index=text_index, partial=partial.model_copy(deep=True)
+            async for chunk in stream:
+                if signal is not None and signal.is_cancelled():
+                    yield AssistantErrorEvent(
+                        reason="aborted",
+                        error=self._error_message(partial, "Cancelled", reason="aborted"),
                     )
-                block = partial.content[text_index]
-                if isinstance(block, TextContent):
-                    block.text += delta.content
-                yield TextDeltaEvent(
-                    content_index=text_index,
-                    delta=delta.content,
-                    partial=partial.model_copy(deep=True),
-                )
+                    return
 
-            for fragment in delta.tool_calls or []:
-                stream_index = fragment.index
-                if stream_index not in our_index_of:
-                    our_index_of[stream_index] = len(partial.content)
-                    tool_json[our_index_of[stream_index]] = ""
-                    partial.content.append(
-                        ToolCall(id=fragment.id or "", name="", arguments={})
+                if chunk.usage is not None:
+                    partial.usage = Usage(
+                        input=chunk.usage.prompt_tokens, output=chunk.usage.completion_tokens
                     )
-                    yield ToolCallStartEvent(
-                        content_index=our_index_of[stream_index],
+
+                if not chunk.choices:
+                    # A usage-only final chunk. Legal, and easy to crash on.
+                    continue
+
+                choice = chunk.choices[0]
+                if choice.finish_reason:
+                    finish = choice.finish_reason
+
+                delta = choice.delta
+                if delta is None:
+                    continue
+
+                if delta.content:
+                    if text_index is None:
+                        text_index = len(partial.content)
+                        partial.content.append(TextContent(text=""))
+                        yield TextStartEvent(
+                            content_index=text_index, partial=partial.model_copy(deep=True)
+                        )
+                    block = partial.content[text_index]
+                    if isinstance(block, TextContent):
+                        block.text += delta.content
+                    yield TextDeltaEvent(
+                        content_index=text_index,
+                        delta=delta.content,
                         partial=partial.model_copy(deep=True),
                     )
 
-                index = our_index_of[stream_index]
-                call = partial.content[index]
-                if not isinstance(call, ToolCall):
-                    continue
-
-                # The id and the name arrive once, usually in the first fragment,
-                # and the arguments arrive as a string cut at arbitrary points.
-                if fragment.id:
-                    call.id = fragment.id
-                if fragment.function is not None:
-                    if fragment.function.name:
-                        call.name = fragment.function.name
-                    if fragment.function.arguments:
-                        tool_json[index] += fragment.function.arguments
-                        yield ToolCallDeltaEvent(
-                            content_index=index,
-                            delta=fragment.function.arguments,
+                for fragment in delta.tool_calls or []:
+                    stream_index = fragment.index
+                    if stream_index not in our_index_of:
+                        our_index_of[stream_index] = len(partial.content)
+                        tool_json[our_index_of[stream_index]] = ""
+                        partial.content.append(
+                            ToolCall(id=fragment.id or "", name="", arguments={})
+                        )
+                        yield ToolCallStartEvent(
+                            content_index=our_index_of[stream_index],
                             partial=partial.model_copy(deep=True),
                         )
 
-        # This format has no per-block stop event, so the `*_end` events are
-        # emitted here, in content order, once the stream is complete.
-        for index, block in enumerate(partial.content):
-            if isinstance(block, TextContent):
-                yield TextEndEvent(
-                    content_index=index,
-                    content=block.text,
-                    partial=partial.model_copy(deep=True),
-                )
-            elif isinstance(block, ToolCall):
-                accumulated = tool_json.get(index, "").strip()
-                try:
-                    block.arguments = json.loads(accumulated) if accumulated else {}
-                except json.JSONDecodeError:
-                    # Malformed arguments are the model's problem to fix; surface
-                    # them rather than crashing here.
-                    block.arguments = {}
-                yield ToolCallEndEvent(
-                    content_index=index,
-                    tool_call=block.model_copy(deep=True),
-                    partial=partial.model_copy(deep=True),
-                )
+                    index = our_index_of[stream_index]
+                    call = partial.content[index]
+                    if not isinstance(call, ToolCall):
+                        continue
 
-        final = partial.model_copy(deep=True)
-        reason = normalise_finish_reason(finish, has_tool_calls=bool(final.tool_calls))
-        final.stop_reason = reason
-        yield AssistantDoneEvent(reason=reason, message=final)
+                    # The id and the name arrive once, usually in the first fragment,
+                    # and the arguments arrive as a string cut at arbitrary points.
+                    if fragment.id:
+                        call.id = fragment.id
+                    if fragment.function is not None:
+                        if fragment.function.name:
+                            call.name = fragment.function.name
+                        if fragment.function.arguments:
+                            tool_json[index] += fragment.function.arguments
+                            yield ToolCallDeltaEvent(
+                                content_index=index,
+                                delta=fragment.function.arguments,
+                                partial=partial.model_copy(deep=True),
+                            )
+
+            # This format has no per-block stop event, so the `*_end` events are
+            # emitted here, in content order, once the stream is complete.
+            for index, block in enumerate(partial.content):
+                if isinstance(block, TextContent):
+                    yield TextEndEvent(
+                        content_index=index,
+                        content=block.text,
+                        partial=partial.model_copy(deep=True),
+                    )
+                elif isinstance(block, ToolCall):
+                    accumulated = tool_json.get(index, "").strip()
+                    try:
+                        block.arguments = json.loads(accumulated) if accumulated else {}
+                    except json.JSONDecodeError:
+                        # Malformed arguments are the model's problem to fix; surface
+                        # them rather than crashing here.
+                        block.arguments = {}
+                    yield ToolCallEndEvent(
+                        content_index=index,
+                        tool_call=block.model_copy(deep=True),
+                        partial=partial.model_copy(deep=True),
+                    )
+
+            final = partial.model_copy(deep=True)
+            reason = normalise_finish_reason(finish, has_tool_calls=bool(final.tool_calls))
+            final.stop_reason = reason
+            yield AssistantDoneEvent(reason=reason, message=final)
 
     @staticmethod
     def _error_message(
@@ -436,6 +492,16 @@ def _explain(exc: APIStatusError) -> str:
             f"local server that does not need one. [{detail}]"
         )
     if status == 429:
+        # 429 covers both "too fast" and "cannot pay". Reporting the second as
+        # the first sends the user to the wrong settings page, and they wait for
+        # a limit that will never reset.
+        if is_permanent_quota_failure(exc):
+            return (
+                "Out of credits: this key's project has no balance, so retrying will "
+                "not help. Add credits at platform.openai.com/settings/organization/"
+                "billing. Note that an sk-proj- key is scoped to ONE project, so a key "
+                f"that works elsewhere belongs to a different one. [{detail}]"
+            )
         return f"Rate limited by the provider, and retries were exhausted. [{detail}]"
     if status == 404:
         return (

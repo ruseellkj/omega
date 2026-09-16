@@ -21,6 +21,7 @@ from omega_ai.retry import (
     DEFAULT_RETRY,
     RetryPolicy,
     delay_for,
+    is_permanent_quota_failure,
     is_retryable,
     retry_after_of,
 )
@@ -278,3 +279,79 @@ def test_a_static_key_still_works() -> None:
 
     provider = AnthropicProvider(client=StubClient(), api_key="static")  # type: ignore[arg-type]
     assert provider is not None
+
+
+# ------------------------------------------- 429 is two different failures
+
+
+class _Status429(Exception):
+    """Minimal stand-in for an SDK error: a status code and a body."""
+
+    def __init__(self, body: str) -> None:
+        super().__init__(body)
+        self.status_code = 429
+
+
+#: Both bodies are real, copied from failures hit while running omega.
+OPENAI_NO_CREDITS = (
+    "Error code: 429 - {'error': {'message': 'You have no credits remaining. Add "
+    "credits to continue using the API at https://platform.openai.com/settings/"
+    "organization/billing/.', 'type': 'insufficient_quota', 'code': "
+    "'credit_balance_exhausted'}}"
+)
+ANTHROPIC_ZERO_LIMIT = (
+    "Error code: 429 - {'type': 'error', 'error': {'type': 'rate_limit_error', "
+    "'message': 'This request would exceed the rate limit you configured in "
+    "workspace Anthropic Academy of 0 input tokens per minute.'}}"
+)
+GENUINE_RATE_LIMIT = (
+    "Error code: 429 - {'error': {'message': 'Rate limit reached for gpt-5 in "
+    "organization org-x on requests per min', 'type': 'requests', 'code': "
+    "'rate_limit_exceeded'}}"
+)
+
+
+def test_running_out_of_credits_is_not_retried() -> None:
+    """Out of credits is not a rate limit, and waiting cannot fix it.
+
+    Retrying spends three delays to reproduce the same failure, and calling it
+    "rate limited" sends the user to the wrong settings page.
+    """
+    assert is_permanent_quota_failure(_Status429(OPENAI_NO_CREDITS))
+    assert not is_retryable(_Status429(OPENAI_NO_CREDITS))
+
+
+def test_a_workspace_limit_of_zero_is_not_retried() -> None:
+    """A limit configured to 0 returns 429 forever. It reads as throttling and
+    is really a settings problem."""
+    assert is_permanent_quota_failure(_Status429(ANTHROPIC_ZERO_LIMIT))
+    assert not is_retryable(_Status429(ANTHROPIC_ZERO_LIMIT))
+
+
+def test_a_genuine_rate_limit_is_still_retried() -> None:
+    """The distinction has to cut one way only.
+
+    Treating every 429 as permanent would undo failure #5 entirely — real
+    throttling is exactly what backoff exists for.
+    """
+    assert not is_permanent_quota_failure(_Status429(GENUINE_RATE_LIMIT))
+    assert is_retryable(_Status429(GENUINE_RATE_LIMIT))
+
+
+def test_the_message_names_the_right_remedy() -> None:
+    """An error a user cannot act on is only half reported.
+
+    "rate limited" for a billing problem is worse than unhelpful: it implies
+    waiting will work.
+    """
+    from omega_ai.anthropic import _explain as explain_anthropic
+    from omega_ai.openai import _explain as explain_openai
+
+    openai_message = explain_openai(_Status429(OPENAI_NO_CREDITS))  # type: ignore[arg-type]
+    assert "credits" in openai_message.lower()
+    assert "sk-proj-" in openai_message, "a project key is scoped to one project"
+    assert "rate limited" not in openai_message.lower()
+
+    anthropic_message = explain_anthropic(_Status429(ANTHROPIC_ZERO_LIMIT))  # type: ignore[arg-type]
+    assert "set to 0" in anthropic_message
+    assert "console" in anthropic_message.lower()

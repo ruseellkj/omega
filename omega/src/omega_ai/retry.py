@@ -50,6 +50,41 @@ class RetryPolicy:
 DEFAULT_RETRY = RetryPolicy()
 
 
+#: **429 means two different things**, and only one is worth waiting for.
+#:
+#: Both vendors reuse it for "you are going too fast" *and* for "your account
+#: cannot pay for this". The status code alone cannot tell them apart, so these
+#: markers are matched against the body. Every one was seen in a real failure,
+#: not invented:
+#:
+#: * `insufficient_quota` / `credit_balance_exhausted` — OpenAI, out of credits
+#: * `billing_not_active` — OpenAI, billing disabled
+#: * `of 0 input tokens per minute` — Anthropic, a workspace limit configured to
+#:   zero, which no amount of waiting will raise
+#:
+#: Matching vendor prose is brittle, and that is acceptable **because the failure
+#: mode is safe**: a marker that stops matching restores the old behaviour —
+#: three wasted retries and a slightly wrong message — rather than breaking
+#: anything.
+_PERMANENT_429_MARKERS = (
+    "insufficient_quota",
+    "credit_balance_exhausted",
+    "billing_not_active",
+    "of 0 input tokens per minute",
+)
+
+
+def is_permanent_quota_failure(exc: BaseException) -> bool:
+    """A 429 that will still be a 429 in an hour.
+
+    Out of credits is not a rate limit. Retrying it spends the user's time to
+    produce an identical failure, and reports "rate limited" for a billing
+    problem — which sends them to the wrong settings page.
+    """
+    detail = str(exc).lower()
+    return any(marker in detail for marker in _PERMANENT_429_MARKERS)
+
+
 def is_retryable(exc: BaseException) -> bool:
     """Whether sending the same request again could plausibly work.
 
@@ -66,6 +101,8 @@ def is_retryable(exc: BaseException) -> bool:
     if not isinstance(status, int):
         return False
     if status in _FATAL_STATUS:
+        return False
+    if status == 429 and is_permanent_quota_failure(exc):
         return False
     return status in _RETRYABLE_STATUS
 

@@ -310,3 +310,38 @@ async def test_the_whole_application_stack_runs_on_either_provider(
     failure = next(m for m in result.messages if isinstance(m, ToolResultMessage))
     assert failure.is_error is True
     assert "not found" in failure.text
+
+
+async def test_the_openai_adapter_closes_the_stream_it_opened() -> None:
+    """The traceback that printed itself over a real answer.
+
+    The adapter iterated the stream and never closed it, so httpcore was closed
+    by the garbage collector at an arbitrary moment — throwing GeneratorExit into
+    a suspended generator and producing a `generator didn't stop after athrow()`
+    traceback in the middle of the model's reply.
+
+    `anthropic.py` already used `async with` on its stream. This pins the same
+    guarantee on the OpenAI side, on the ordinary path and on the abandoned one.
+    """
+    from omega_agent.cancellation import CancelSignal
+
+    client = stub_openai.StubClient()
+    provider = OpenAIProvider(client=client, api_key="k")
+
+    async for _ in provider.stream_response(
+        model="m", system="s", messages=[UserMessage(content="hi")], tools=[], signal=None
+    ):
+        pass
+
+    assert client.last_stream is not None
+    assert client.last_stream.closed, "a fully consumed stream must still be closed"
+
+    # And when the consumer walks away early, which is the case that actually bit.
+    signal = CancelSignal()
+    signal.cancel()
+    async for _ in provider.stream_response(
+        model="m", system="s", messages=[UserMessage(content="hi")], tools=[], signal=signal
+    ):
+        pass
+
+    assert client.last_stream.closed, "an abandoned stream must be closed too"

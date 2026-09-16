@@ -72,10 +72,32 @@ def _tool_path() -> list[Any]:
 
 
 class _Stream:
+    """Stands in for `openai.AsyncStream`.
+
+    **It is an async context manager because the real one is.** A stub that
+    models less than the thing it replaces lets bugs through silently: the
+    adapter consumed this stream without ever closing it, the real SDK left that
+    to the garbage collector, and the result was an httpcore traceback printed
+    over the model's answer — invisible to a suite whose stub did not care
+    whether it was closed.
+    """
+
     def __init__(self, events: list[Any], fail_after: int | None, error: Callable[[], Exception]):
         self._events = events
         self._fail_after = fail_after
         self._error = error
+        #: Asserted on, so "the adapter closes what it opens" becomes a tested
+        #: claim rather than an intention.
+        self.closed = False
+
+    async def __aenter__(self) -> _Stream:
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        self.closed = True
+
+    async def close(self) -> None:
+        self.closed = True
 
     def __aiter__(self) -> _Stream:
         self._iter: Iterator[Any] = iter(self._events)
@@ -108,11 +130,17 @@ class _Completions:
             raise client.error()
 
         events = _tool_path() if client.script == "tool" else _text_path()
-        return _Stream(events, fail_after=client.fail_midstream_after, error=client.error)
+        stream = _Stream(events, fail_after=client.fail_midstream_after, error=client.error)
+        # Kept so a test can assert the adapter closed what it was handed.
+        client.last_stream = stream
+        return stream
 
 
 class StubClient:
     """Mirrors stub_anthropic.StubClient's knobs so one contract suite drives both."""
+
+    #: The most recent `_Stream` handed to the adapter, for close assertions.
+    last_stream: _Stream | None = None
 
     def __init__(
         self,

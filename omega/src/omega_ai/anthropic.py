@@ -61,6 +61,7 @@ from omega_ai.retry import (
     DEFAULT_RETRY,
     RetryPolicy,
     delay_for,
+    is_permanent_quota_failure,
     is_retryable,
     retry_after_of,
 )
@@ -429,6 +430,14 @@ def _explain(exc: APIStatusError) -> str:
         return (
             "Authentication failed. Check ANTHROPIC_API_KEY in your .env "
             f"(see .env.sample). [{detail}]"
+        )
+    if status == 429 and is_permanent_quota_failure(exc):
+        # A workspace whose rate limit is configured to 0 returns 429 forever.
+        # It reads as throttling and is really a settings problem.
+        return (
+            "This workspace's rate limit is set to 0, so every request is refused and "
+            "retrying will not help. Raise it in the Anthropic Console under Settings "
+            f"> Workspaces, or use a key from another workspace. [{detail}]"
         )
     if status == 400 and "credit balance" in detail.lower():
         return (
