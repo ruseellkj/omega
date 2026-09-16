@@ -34,6 +34,7 @@ from omega_ai.openai import OpenAIProvider
 from omega_coding.approval import Answer, ApprovalPolicy, ApprovalRequest
 from omega_coding.builtin_tools import build_tools
 from omega_coding.commands import CommandContext, dispatch
+from omega_coding.compact import Compactor
 from omega_coding.context import measure
 from omega_coding.cost import CostTracker, price_from_env
 from omega_coding.env import USER_CONFIG, find_env_files, load_environment
@@ -361,8 +362,12 @@ def main() -> None:
         ),
         after_tool_call=redacting_hook,
         # Keep failed turns in the transcript, out of the request. The simpler
-        # sibling of the seam compaction uses at Tier 3.
+        # sibling of the seam compaction fills below.
         convert_to_llm=drop_empty_failed_turns,
+        # Tier 3, beginner failure #1. Constructed here rather than taking the
+        # model and tools as hook arguments, because widening `ContextTransform`
+        # would touch `hooks.py`, `loop.py` and `history.py` to spare one line.
+        transform_context=Compactor(model=model, system=system, tools=tools),
     )
 
     store = None if args.no_save else JsonlSessionStore(root)

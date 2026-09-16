@@ -43,11 +43,13 @@ These are the scorecard. Everything else in this file is a feature; these two ar
 
 | Missing | What it costs today | The seam | Seam status |
 |---|---|---|---|
-| **Compaction** — failure **#1** | Long tasks still die at the context limit. Tier 2 only *shows* you the wall approaching, via `/context` | `transform_context` (`hooks.py:93`), consulted by `loop.py`, currently filled by nothing | **exists, empty** |
+| ~~**Compaction** — failure **#1**~~ **LANDED** | Long tasks died at the context limit; Tier 2 could only *show* the wall coming, via `/context` | `transform_context` (`hooks.py:93`), now filled by `compact.py` | **filled** |
 | **Prompt caching** — failure **#9** | Every turn re-bills the system prompt and the whole tool schema block | Not a hook — a **constraint**. Cache markers need a byte-identical prefix, which is why `OMEGA.md` is prepended once at startup and never regenerated per turn | n/a |
 
 Closing these two takes the beginner scorecard from **7 of 9** to **9 of 9**, which is the whole
 point of the tier and the reason it comes before anything on the Tier 3+ list.
+
+**#1 is now closed.** The scorecard stands at **8 of 9**; prompt caching is the last one.
 
 ### Everything else Tier 3 adds
 
@@ -60,6 +62,33 @@ point of the tier and the reason it comes before anything on the Tier 3+ list.
 | **Image reading** | Screenshots cannot be handed to the model | `types.py` content blocks are a discriminated union; an image block is an addition, not a change | **exists** |
 | **Subagents *or* plan mode** | No task decomposition | `before_tool_call` plus the headless driver. A subagent **is** the headless driver, called from a tool | **exists** |
 | **Redaction at the transcript boundary** | Redaction sits on `after_tool_call`, which fires only when a tool *returns a value*. Two paths go around it | A **new hook slot** in `harness.py`, firing when a message is recorded rather than when a tool returns | **does not exist** |
+
+### Compaction — landed
+
+`omega_coding/compact.py`, filling `transform_context`. **`loop.py` gained zero
+lines**, which was the test the seam was built to pass.
+
+Measured end to end through a real turn: a 21-message transcript estimated at
+**10,004 tokens went out as 4 messages and 1,054 tokens** against a 1,600 budget,
+while the transcript itself *grew* from 20 messages to 22. That is the two-views
+split doing exactly what it was designed for.
+
+It is mechanical, not model-based: drop the oldest whole turns, then shrink what
+remains — tool output first, because it is the only thing that can be recovered
+by running the tool again; assistant prose second; **the user's own messages
+never**. Summarising with a model is the obvious alternative and is where Pi
+spends ~880 lines, but it cannot be tested offline, and omega's suite runs in
+three seconds against no network. It is an addition on top of this, in the same
+seam.
+
+**Fuzzing found a real gap that reading did not.** 3,000 random transcripts
+produced zero invariant violations but left 279 over budget, and all of them had
+the same shape: no tool results to cut, so the first version could do nothing.
+Adding the prose pass took that to 93, and every one of those remaining is one of
+two deliberate refusals — the user's own words exceeding the budget (74), or the
+`MIN_RESULT_TOKENS` floor multiplied out on an absurdly small window (19,
+overshooting by 2 tokens). The trade is stated in the module: **validity is
+absolute, size is best-effort.**
 
 ### The ordering constraint
 

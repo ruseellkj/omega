@@ -72,7 +72,8 @@ neither imports it.
 | 24 | `redact.py` | 101 | Keeps credentials out of the transcript. Fills `after_tool_call`. |
 | 24b | `commands.py` | 280 | **The command channel.** `/help`, `/clear`, `!cmd` — what tells the *program* something instead of asking the model. Note `dispatch` returns three things, and that `!cmd` reuses `execute_tool_call` rather than the shell. |
 | 25 | `history.py` | 42 | **Two views of history**: what is kept versus what is sent. The small sibling of the seam compaction will use at Tier 3. |
-| 26 | `context.py` | 116 | How full the context window is. Measures a problem it does not fix. |
+| 26 | `context.py` | 116 | How full the context window is. Measures the problem `compact.py` fixes. |
+| 26a | `compact.py` | 351 | **Tier 3.** Fills `transform_context`. Cuts on turn boundaries so a tool call is never orphaned. |
 | 27 | `cost.py` | 96 | What the run cost. Read why it ships **no price table**. |
 | 28 | `headless.py` | 113 | Run the agent with no keyboard. Also the benchmark interface, and at Tier 3+ a subagent is this function called from a tool. |
 | 29 | `evals.py` | 136 | Does the assembled agent still work? Not a test — read the docstring on the difference. |
