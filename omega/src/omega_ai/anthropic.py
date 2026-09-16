@@ -308,9 +308,28 @@ class AnthropicProvider:
         #: needs, and it costs about ten lines to have now instead of later.
         self._auth = auth
 
+        #: Only a client we built is ours to close. See `aclose`.
+        self._owns_client = client is None
         self._client = client or AsyncAnthropic(
             api_key=api_key or os.environ.get("ANTHROPIC_API_KEY")
         )
+
+
+    async def aclose(self) -> None:
+        """Close the HTTP client, but only one this adapter created.
+
+        The *stream* is already closed deterministically below; the **client**
+        outlives it and owns a connection pool. Left to the garbage collector,
+        that pool is torn down at interpreter shutdown — after the event loop is
+        gone — and throws `GeneratorExit` into generators that can no longer
+        handle it, which surfaces as a `generator didn't stop after athrow()`
+        traceback printed after the session summary.
+
+        A caller-supplied client is not ours to close: a test or an embedder may
+        still be using it. Tau draws the same line (`tau_ai/anthropic.py:85-89`).
+        """
+        if self._owns_client:
+            await self._client.close()
 
     def stream_response(
         self,

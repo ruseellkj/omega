@@ -49,14 +49,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import difflib
-from collections.abc import Callable
-from pathlib import Path
+from collections.abc import Callable, Iterator
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from omega_agent.tools import Tool, ToolError, ToolResult
 from omega_agent.types import CancellationToken
 from omega_coding.file_lock import FILE_LOCKS, FileLocks
-from omega_coding.paths import resolve_path, resolve_within_root
+from omega_coding.paths import is_inside, resolve_path, resolve_within_root
 from omega_coding.truncate import MAX_BYTES, MAX_LINES, truncate_output
 
 #: How long a command may run before it is killed. A hung command used to hang
@@ -103,6 +103,75 @@ def _write_text(path: Path, content: str) -> None:
 
 def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+#: Per-tool result caps. Separate from `truncate_output`'s overall budget, which
+#: caps the *whole* reply: one minified file is a single multi-megabyte line, and
+#: capping only the total lets that one hit crowd out every other file's matches.
+MAX_LIST_ENTRIES = 500
+MAX_FIND_RESULTS = 1_000
+MAX_SEARCH_MATCHES = 100
+MAX_MATCH_LINE = 400
+
+#: Never worth walking into, and expensive to walk. `.git` alone can be most of
+#: the files in a repository and none of them are the ones being looked for.
+SKIP_DIRECTORIES = frozenset(
+    {".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache",
+     ".pytest_cache", ".ruff_cache", "dist", "build", ".next", "target"}
+)
+
+
+def _walk(base: Path) -> Iterator[Path]:
+    """Every file under `base`, without ever leaving it.
+
+    **Symlinks are not followed, and that is the whole point of writing this by
+    hand instead of calling `rglob`.** A directory link inside the project
+    pointing at `$HOME` would enumerate the home directory, and the approval gate
+    could not object because no outside-root path was ever passed to it — the
+    gate reads arguments, and this one never appears in any.
+
+    Each hit is re-resolved and checked against `base` anyway. Belt and braces,
+    because this project's scars are all in this area: `..` smuggled through a
+    rebuilt path, and a recursive grant that reached `~/.ssh`.
+    """
+    stack = [base]
+    while stack:
+        current = stack.pop()
+        try:
+            entries = sorted(current.iterdir())
+        except OSError:
+            continue  # unreadable directory: skip it, do not fail the whole walk
+        for entry in entries:
+            if entry.is_symlink():
+                continue
+            try:
+                if entry.is_dir():
+                    if entry.name not in SKIP_DIRECTORIES:
+                        stack.append(entry)
+                elif entry.is_file() and is_inside(entry, base):
+                    yield entry
+            except OSError:
+                continue
+
+
+def _relative(path: Path, base: Path) -> str:
+    """Paths are shown relative to the root: shorter, and not a machine map."""
+    try:
+        return path.relative_to(base).as_posix()
+    except ValueError:  # pragma: no cover - _walk already guarantees this
+        return str(path)
+
+
+def _readable_lines(path: Path) -> list[str] | None:
+    """The file's lines, or None when it is not text.
+
+    A repository has images and compiled artefacts. A decode error is the signal
+    to move on, not to fail the search that happened to reach one.
+    """
+    try:
+        return path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return None
 
 
 def _as_tool_error(path: Path, exc: OSError | UnicodeDecodeError) -> ToolError:
@@ -344,6 +413,121 @@ def build_tools(
             details={"exit_code": process.returncode, "truncated": truncation.truncated},
         )
 
+    async def list_files(
+        arguments: dict[str, Any], signal: CancellationToken | None
+    ) -> ToolResult:
+        directory = resolve(arguments.get("path") or ".", base)
+        if not directory.is_dir():
+            raise ToolError(f"Not a directory: {directory}")
+
+        limit = int(arguments.get("limit") or MAX_LIST_ENTRIES)
+        try:
+            entries = sorted(directory.iterdir(), key=lambda e: (not e.is_dir(), e.name))
+        except OSError as exc:
+            raise _as_tool_error(directory, exc) from exc
+
+        # A trailing slash on directories, because a bare name does not say
+        # whether it can be read or descended into, and the model will guess.
+        shown = [f"{e.name}/" if e.is_dir() else e.name for e in entries[:limit]]
+        if not shown:
+            return ToolResult(content=f"{_relative(directory, base) or '.'} is empty")  # type: ignore[arg-type]
+
+        note = "" if len(entries) <= limit else f"\n... {len(entries) - limit} more (limit {limit})"
+        body, truncation = truncate_output("\n".join(shown) + note, label="list")
+        return ToolResult(
+            content=body,  # type: ignore[arg-type]
+            details={"truncated": truncation.truncated},
+        )
+
+    async def find_files(
+        arguments: dict[str, Any], signal: CancellationToken | None
+    ) -> ToolResult:
+        pattern = str(arguments["pattern"])
+        directory = resolve(arguments.get("path") or ".", base)
+        limit = int(arguments.get("limit") or MAX_FIND_RESULTS)
+
+        def _search() -> list[str]:
+            hits: list[str] = []
+            for path in _walk(directory):
+                # `full_match`, not `fnmatch`. fnmatch has no notion of a path
+                # separator, so `**/*.py` misses a top-level file entirely -
+                # found by a test, not by reading. `full_match` implements real
+                # glob semantics where `**/` spans zero or more directories.
+                #
+                # The bare-name fallback is a deliberate convenience: searching
+                # for `loop.py` should find it wherever it lives.
+                relative = PurePosixPath(_relative(path, directory))
+                if relative.full_match(pattern) or PurePosixPath(path.name).full_match(pattern):
+                    hits.append(_relative(path, base))
+                    if len(hits) >= limit:
+                        break
+            return hits
+
+        found = await asyncio.to_thread(_search)
+        if not found:
+            return ToolResult(
+                content=f"no files match {pattern!r} under {_relative(directory, base) or '.'}"  # type: ignore[arg-type]
+            )
+
+        note = "" if len(found) < limit else f"\n... stopped at the limit of {limit}"
+        body, truncation = truncate_output("\n".join(found) + note, label="find")
+        return ToolResult(
+            content=body,  # type: ignore[arg-type]
+            details={"truncated": truncation.truncated},
+        )
+
+    async def search_files(
+        arguments: dict[str, Any], signal: CancellationToken | None
+    ) -> ToolResult:
+        import re as _re
+
+        raw_pattern = str(arguments["pattern"])
+        flags = _re.IGNORECASE if arguments.get("ignore_case") else 0
+        try:
+            expression = _re.compile(raw_pattern, flags)
+        except _re.error as exc:
+            # A typo in a pattern is data, not a crash - and saying *what* was
+            # wrong is the difference between one retry and several.
+            raise ToolError(f"Invalid search pattern {raw_pattern!r}: {exc}") from exc
+
+        directory = resolve(arguments.get("path") or ".", base)
+        glob = arguments.get("glob")
+        limit = int(arguments.get("limit") or MAX_SEARCH_MATCHES)
+
+        def _search() -> tuple[list[str], bool]:
+            hits: list[str] = []
+            for path in _walk(directory):
+                if glob and not (
+                    PurePosixPath(path.name).full_match(str(glob))
+                    or PurePosixPath(_relative(path, directory)).full_match(str(glob))
+                ):
+                    continue
+                lines = _readable_lines(path)
+                if lines is None:
+                    continue  # binary, or unreadable: not an error
+                for number, line in enumerate(lines, start=1):
+                    if not expression.search(line):
+                        continue
+                    # Capped *per line*. truncate_output caps the whole reply, so
+                    # without this one minified file is a single enormous match
+                    # that crowds out every other file's hits.
+                    text = line if len(line) <= MAX_MATCH_LINE else line[:MAX_MATCH_LINE] + " ..."
+                    hits.append(f"{_relative(path, base)}:{number}: {text.strip()}")
+                    if len(hits) >= limit:
+                        return hits, True
+            return hits, False
+
+        found, capped = await asyncio.to_thread(_search)
+        if not found:
+            return ToolResult(content=f"no matches for {raw_pattern!r}")  # type: ignore[arg-type]
+
+        note = f"\n... stopped at the limit of {limit} matches" if capped else ""
+        body, truncation = truncate_output("\n".join(found) + note, label="search")
+        return ToolResult(
+            content=body,  # type: ignore[arg-type]
+            details={"truncated": truncation.truncated},
+        )
+
     return [
         Tool(
             name="read_file",
@@ -429,6 +613,90 @@ def build_tools(
                 "more context - do not guess",
             ),
             execute=edit_file,
+        ),
+        Tool(
+            name="list_files",
+            description=(
+                "List the entries of a directory, directories first and marked with a "
+                "trailing slash. Prefer this over `run_shell ls`: it is cheaper, its "
+                "output is budgeted, and it cannot be confused by a shell."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Directory to list. Defaults to the working directory.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": f"Maximum entries to return (default {MAX_LIST_ENTRIES}).",
+                    },
+                },
+            },
+            execute=list_files,
+        ),
+        Tool(
+            name="find_files",
+            description=(
+                "Find files by name using a glob pattern, e.g. '**/*.py' or 'test_*.py'. "
+                "Searches by path, never by content - use search_files for that. "
+                "Symlinks are not followed and common build directories are skipped."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Glob pattern, e.g. '**/*.py' or 'test_*.py'.",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Directory to search under. Defaults to the working dir.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": f"Maximum results (default {MAX_FIND_RESULTS}).",
+                    },
+                },
+                "required": ["pattern"],
+            },
+            execute=find_files,
+        ),
+        Tool(
+            name="search_files",
+            description=(
+                "Search file *contents* for a regular expression, returning 'path:line: text' "
+                "for each match. Prefer this over reading whole files to look for something: "
+                "it returns the few lines that matched rather than every line that did not."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Python regular expression to search for.",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Directory to search under. Defaults to the working dir.",
+                    },
+                    "glob": {
+                        "type": "string",
+                        "description": "Only search files matching this glob, e.g. '*.py'.",
+                    },
+                    "ignore_case": {
+                        "type": "boolean",
+                        "description": "Case-insensitive search. Defaults to false.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": f"Maximum matches (default {MAX_SEARCH_MATCHES}).",
+                    },
+                },
+                "required": ["pattern"],
+            },
+            execute=search_files,
         ),
         Tool(
             name="run_shell",

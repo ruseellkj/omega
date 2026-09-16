@@ -273,11 +273,21 @@ async def test_schemas_are_well_formed(tmp_path: Path) -> None:
             assert name in tool.parameters["properties"]
 
 
-async def test_there_are_four_tools_now(tmp_path: Path) -> None:
+async def test_there_are_seven_tools_now(tmp_path: Path) -> None:
+    """Four became seven when Tier 3 added search.
+
+    The count is asserted rather than the set alone, because a tool appearing
+    without anyone noticing is how `_PATH_ARGUMENTS` in `approval.py` falls out
+    of date — and a tool missing from that table loses its outside-root check in
+    silence.
+    """
     assert sorted(t.name for t in build_tools(tmp_path)) == [
         "edit_file",
+        "find_files",
+        "list_files",
         "read_file",
         "run_shell",
+        "search_files",
         "write_file",
     ]
 

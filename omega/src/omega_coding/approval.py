@@ -98,7 +98,7 @@ Asker = Callable[[ApprovalRequest], Awaitable[Answer]]
 #: Tools that only observe. Gating these inside the root costs attention and
 #: buys nothing. **Outside the root they are gated like anything else** — see the
 #: module docstring; that narrowing is what replaced the fence.
-READ_ONLY_TOOLS = frozenset({"read_file"})
+READ_ONLY_TOOLS = frozenset({"read_file", "list_files", "find_files", "search_files"})
 
 #: Arguments that name a filesystem path, per tool. Used to work out whether a
 #: call leaves the root. `run_shell` is absent on purpose: its `command` is not a
@@ -108,6 +108,12 @@ _PATH_ARGUMENTS: dict[str, str] = {
     "read_file": "path",
     "write_file": "path",
     "edit_file": "path",
+    # The search tools all name their directory `path`, deliberately: the gate
+    # reads this table to find out where a call reaches, and a tool that spelled
+    # it `dir` would lose its outside-root check in silence.
+    "list_files": "path",
+    "find_files": "path",
+    "search_files": "path",
 }
 
 

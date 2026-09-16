@@ -104,7 +104,27 @@ pays the write back (1.25 + 0.1 = 1.35 against 2.0 uncached). The 1-hour TTL
 doubles the write and is not used: it pays off only for a subscription that is
 not billed per token, which is Tau's reason for choosing it and not omega's.
 
-**Still not closed.** Markers are sent and tested; a cache *hit* is unproven,
+**Confirmed on OpenAI, 2026-09-16.** Two live runs settled the threshold
+question empirically rather than by estimate:
+
+| Run | Input tokens per turn | Cache read |
+|---|---|---|
+| a short chat | 831, then ~851 | **0** |
+| read one file, then a follow-up | 1,729, then ~6,400 | **2,560** |
+
+`cache: 2,560 read, 0 written (32% of input served from cache)`. The first run
+stayed under OpenAI's 1,024-token minimum and cached nothing; the second crossed
+it on the opening turn. That is the same boundary the prefix measurement
+predicted, now measured instead of bounded — and it confirms the shape of the
+problem: **a real coding turn clears the minimum immediately**, and the short
+chat that does not is the one that costs nothing anyway. `0 written` is correct;
+OpenAI reports reads only.
+
+**Anthropic is still unproven,** and the mechanism does not transfer — OpenAI
+caches server-side with nothing sent, while Anthropic needs the explicit markers
+above. So #9 is **closed for OpenAI, pending for Anthropic**.
+
+**Still not closed overall.** Markers are sent and tested; an Anthropic cache hit is unproven,
 because the key on this machine returns `credit balance is too low`. Two turns
 against a live provider with `cache_read_input_tokens > 0` closes it. The
 scorecard stays at **8 of 9** until then.
@@ -114,7 +134,7 @@ scorecard stays at **8 of 9** until then.
 | Missing | What it costs today | The seam | Seam status |
 |---|---|---|---|
 | **A real TUI** | Print output cannot show a diff, a spinner, or a sidebar — and cannot accept a keystroke mid-turn | The 10 agent events (`agent_events.py:49-139`) | **exists** |
-| **Search tools** — `grep`, `find`, `ls` | The model shells out to `rg`, which works but has no output budget of its own | Three more `Tool` objects. `truncate_output()` (`truncate.py`) and path resolution (`paths.py`) both exist | **exists** |
+| ~~**Search tools**~~ **LANDED** | The model read whole files to find one line, and shelled out for the rest | `list_files`, `find_files`, `search_files` in `builtin_tools.py` | **filled** |
 | **Session branching** | You can rewind by reading the JSONL, but not fork and navigate | `parent_id` is already written on every entry (`session/entries.py`). Tier 3 adds `tree.py` — `path_to_entry`, cycle detection | **exists** |
 | **Structured logging** | Debugging means reading print output | A second listener on the same event stream. Not a new mechanism | **exists** |
 | **Image reading** | Screenshots cannot be handed to the model | `types.py` content blocks are a discriminated union; an image block is an addition, not a change | **exists** |
@@ -194,6 +214,51 @@ the loop and `repair_orphans` are both covered without knowing it exists.
 `loop.py` gained zero lines. The two earlier patches stay: defence in depth, and
 `after_tool_call` still masks a result before the model reads it, one step
 earlier than recording.
+
+### Search tools — landed
+
+Four tools became seven: `list_files`, `find_files`, `search_files`.
+
+**One reference does without them, and that is the interesting part.** Tau ships
+exactly four — read, write, edit, bash — and expects the model to shell out. Pi
+has `find`, `grep` and `ls`. omega held Tau's position until a live run made the
+cost concrete: asked how many lines `loop.py` had, the model called
+`read_file(limit=1000)` to pull the entire file into context, then
+`run_shell("wc -l")`. After, asking where a class is defined returns one line:
+
+```
+search_files({'pattern': 'class Tool', 'path': 'src'})
+  -> src/omega_agent/tools.py:58: class Tool:
+```
+
+**Pure Python, no ripgrep.** Pi shells out to `rg` and downloads the binary when
+it is missing (`grep.ts:172`). The suite runs offline against no external binary,
+and buying search at the cost of that property would be a poor trade.
+
+Three things carried real risk, and each has a test:
+
+* **Symlinks.** A directory link inside the project pointing at a home directory
+  would enumerate it with **no outside-root path ever reaching the approval
+  gate** — the gate reads arguments, and that path appears in none. The walker is
+  written by hand, skips links, and re-resolves every hit against the root anyway.
+* **The gate's path table.** `approval.py` maps each tool name to the argument
+  naming a path. A new tool missing from it loses its location check silently, so
+  all three name their directory `path` and all three are registered.
+* **Per-match line caps.** `truncate_output` caps the whole reply; one minified
+  file is a single multi-megabyte line that would use the budget by itself.
+
+A fourth was found only by running the tests: `fnmatch` has no notion of a path
+separator, so `**/*.py` silently missed every top-level file.
+`PurePosixPath.full_match` implements real glob semantics and fixed it.
+
+### The httpcore traceback, again — and it was a second bug
+
+The per-turn traceback fixed earlier was a new event loop per prompt. A
+shutdown-time one survived it, with a different cause: the provider's HTTP client
+was never closed, so its connection pool was collected at interpreter shutdown —
+after the event loop was gone. Both adapters now have `aclose()`, closing only a
+client they created, and `_repl` calls it on every exit path. Measured after:
+`0 occurrences` of `athrow` in a full session.
 
 ### The ordering constraint
 

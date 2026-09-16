@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import os
 import signal
 import sys
@@ -440,6 +441,25 @@ def main() -> None:
     )
 
 
+async def _close_provider(provider: ModelProvider) -> None:
+    """Shut the provider's HTTP client down while the event loop still exists.
+
+    Not part of `ModelProvider`: that protocol is one method on purpose, and
+    `FakeProvider` has no client to close. This is a composition-root concern, so
+    it is asked for by duck-typing rather than widened into the contract.
+
+    Without it the client's connection pool is collected at interpreter
+    shutdown - after the loop is gone - and prints a
+    `generator didn't stop after athrow()` traceback under the session summary.
+    Related to the per-turn traceback fixed earlier and *not* the same bug: that
+    one was a new event loop per prompt, this one is a client never closed.
+    """
+    closer = getattr(provider, "aclose", None)
+    if closer is not None:
+        with contextlib.suppress(Exception):
+            await closer()
+
+
 async def _repl(
     *, harness: Harness, context: CommandContext, model: str, system: str
 ) -> None:
@@ -455,6 +475,18 @@ async def _repl(
     `_ask_in_terminal` already does for approvals and for the same reason: a
     blocking `input` stalls everything else the loop is running.
     """
+    try:
+        await _converse(harness=harness, context=context, model=model, system=system)
+    finally:
+        # Inside the loop that created it, on every exit path - Ctrl-C, /exit,
+        # EOF. Closing after `asyncio.run` returns would be too late.
+        await _close_provider(harness.provider)
+
+
+async def _converse(
+    *, harness: Harness, context: CommandContext, model: str, system: str
+) -> None:
+    """The prompt loop itself, split out so `_repl` can own the shutdown."""
     while True:
         try:
             prompt = await asyncio.to_thread(input, "You: ")
