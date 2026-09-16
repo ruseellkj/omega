@@ -10,7 +10,7 @@ shipping — he reads every line himself.
 
 | Directory | What it is |
 |---|---|
-| `omega/` | **the agent.** Three packages, 5,283 lines of `src/`, 338 tests. Tier 2 complete. |
+| `omega/` | **the agent.** Three packages, 6,247 lines of `src/`, 395 tests. Tier 2 complete. |
 | `dev-notes/` | the study notes — teardowns of the references, architecture decisions, concepts |
 | `research/pi/` | **reference 1**: Pi (TypeScript), `github.com/earendil-works/pi` |
 | `research/tau/` | **reference 2**: Tau (Python), `github.com/huggingface/tau` — a port of Pi |
@@ -25,7 +25,7 @@ references do this?" — never edit them.
 ```bash
 cd omega
 uv sync                             # install from the lockfile
-uv run pytest -q                    # 338 tests, ~2s, fully offline
+uv run pytest -q                    # 395 tests, ~3s, fully offline
 uv run mypy --strict src            # must be clean
 uv run ruff check .                 # must be clean
 uv run python -m omega_coding.evals # smoke eval, 4/4, no network
@@ -70,7 +70,7 @@ If a change would grow `loop.py`, it almost certainly belongs behind a hook inst
 
 ## Reading the code
 
-`omega/READING-ORDER.md` gives all 31 files in dependency order with one line each. Start there,
+`omega/READING-ORDER.md` gives all 38 files in dependency order with one line each. Start there,
 not with `ls`. `omega/TIER-1.md` and `omega/TIER-2.md` record what each tier has, what it lacks,
 and where Tier 3 puts it.
 
@@ -78,21 +78,65 @@ and where Tier 3 puts it.
 `dev-notes/00-concepts/state-and-delegation.md` compares omega, Pi, Tau and Claude Code on
 persistence, retry, locking, subagents and sessions.
 
-## Conventions that matter here
+## Three rules that apply to everything
+
+Not style preferences. Each is here because breaking it caused real damage in this repo, during
+ordinary build work rather than during explanations.
+
+**1 · Never name something that does not exist without saying so.**
+A hook called `before_record` and a tier called "Tier 2.5" were both invented mid-answer and sat
+beside six real hook names and two real tier names. They read as real and cost a round of
+confusion each. Before citing any symbol, flag, file or tier: **grep for it.** If it is not there,
+say so. If something hypothetical needs a name, mark it as invented in the same sentence.
+
+**2 · Run it and paste the output. Do not assert behaviour.**
+Three claims made confidently here were false, and each was disproved in under a minute by
+executing it:
+
+- "always-allow cannot break the path fence" — it could
+- "redaction covers tool failures" — it did not; `exit 1` leaked the key
+- "outside-root grants are safe" — they were recursive, so approving `~/.zshrc` authorised `~/.ssh`
+
+A ten-line script beats a confident paragraph. If the output contradicts the explanation, the
+explanation was wrong.
+
+**3 · Compare against the references with evidence, never from memory.**
+`research/pi/` and `research/tau/` are on disk — read them.
+
+| | What counts as evidence |
+|---|---|
+| Pi | file and line from `research/pi/` |
+| Tau | file and line from `research/tau/` |
+| Claude Code | **closed source** — its published docs, or "unknown". Never a guess |
+
+"I cannot read Claude Code's source, so I will not guess" is a complete answer. A plausible row
+invented to fill a table is not.
+
+## Other conventions
 
 - **Docstrings carry the argument, not just the description.** Most modules explain *why* they are
   shaped that way, including which alternatives were rejected. Match that when adding code.
 - **Conventional Commits**, since `6aa9261`. Earlier subjects are prose and predate the decision.
 - **Do not commit after every step, and never `git push`** — that is Rushil's call. Make the
   change, verify it, report it, and stop.
+- **Never `git add -A` or `git add .`** — stage named paths only. `omega/website/` belongs to a
+  different session, and one blanket add swept three of its in-progress files into an unrelated
+  commit, which would have reverted merged work on push.
 - **Plain language in chat, depth in files.** Explanations should be mechanical and worked through,
-  not summarised; the exhaustive version belongs in `dev-notes/`.
+  not summarised; the exhaustive version belongs in `dev-notes/`. For conceptual questions the
+  `explain-in-depth` skill carries the full method.
 
 ## Current state
 
 **Tier 2 complete**, plus post-Tier-2 fixes: the path fence was removed in favour of a
 location-aware approval gate, tool descriptions were rewritten against both references, the system
 prompt moved to `omega_coding/system_prompt.py`, and two redaction bypasses were closed.
+
+Since then, three additions that are **ergonomics, not scorecard progress** — none of the nine
+failures moved: `omega_coding/commands.py` (seven `/` commands and a `!` shell escape, routed
+through `execute_tool_call` so the escape meets the approval gate), `omega_coding/status.py` (a
+working line with truthful labels), and a single REPL event loop, which removed the httpcore
+traceback that four isolated reproductions had failed to trigger.
 
 Known gaps, all recorded in `omega/TIER-2.md`:
 

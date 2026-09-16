@@ -213,7 +213,43 @@ lands without surgery.
   turns, but a `print`/`input` REPL has no way to accept a keystroke while a turn is running. A
   Tier 3 TUI is what makes them reachable; until then they are usable programmatically
   (`harness.queue_steering(...)`) and covered by tests.
+- **`!cmd` does not add its output to the conversation, and both references disagree.**
+  Tau (`session.py:2529-2542`) and Pi (`interactive-mode.ts:2861-2877`) both make the plain
+  form add output to context and the doubled form hide it. omega inverts that: `!` is the
+  free one, because a shell command silently enlarging every later request is the
+  surprising half. A context-adding `!!` can arrive later — at which point omega's `!!`
+  will mean the opposite of theirs, which is a real inconsistency and is why it is written
+  down here rather than left to be discovered.
+
 - **The context gauge is chars/4.** It never claims to be exact — only never wildly wrong.
+- ~~`--provider openai` prints an httpcore traceback after each answer.~~ **Fixed — and the
+  cause was ours after all.**
+
+  A `RuntimeError: generator didn't stop after athrow()` from
+  `httpcore2/_async/connection_pool.py` appeared after every OpenAI turn. Four attempts to
+  reproduce it in isolation failed — plain `httpx`, an async generator holding a stream
+  open, `httpx2`, and one client across several `asyncio.run` calls — so it was recorded
+  here as probably upstream.
+
+  **It was `asyncio.run(_run_turn(...))` sitting inside the REPL's `while True`.** Every
+  prompt built and tore down an event loop, while `AsyncOpenAI` — constructed once at
+  startup — outlived all of them. A connection pool is only valid within the loop that
+  created it; using one across loops is undefined behaviour, and the traceback was that
+  undefined behaviour surfacing during generator finalisation. The Anthropic adapter
+  never showed it because it is on the older `httpx`/`httpcore` stack, which tolerates
+  the abuse quietly.
+
+  The REPL now runs on **one** event loop (`cli.py:_repl`), with `input` moved off it via
+  `asyncio.to_thread`. Verified live: a real `--provider openai` turn, no traceback.
+
+  The lesson is in the failed reproductions rather than the fix. Every one of them used a
+  single `asyncio.run`, so not one of them could ever have triggered the bug — four
+  experiments that read as evidence of absence and were only evidence that the
+  reproduction was wrong. **"Could not reproduce" is not "not ours".**
+
+  Also fixed while chasing it, and correct regardless: the adapter iterated its stream
+  without ever closing it. It now uses `async with`, matching `anthropic.py:292`, pinned
+  by `test_the_openai_adapter_closes_the_stream_it_opened`.
 - **Redaction had two ways around it. Both are patched; the shape that produced them is not.**
   `redacting_hook` fills `after_tool_call`, which fires only when a tool hands back a value.
   1. ~~A tool that raises skips it.~~ **Fixed.** `tool_runner.py` returned from its `except` block

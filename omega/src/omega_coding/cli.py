@@ -33,11 +33,13 @@ from omega_ai.openai import DEFAULT_MODEL as OPENAI_MODEL
 from omega_ai.openai import OpenAIProvider
 from omega_coding.approval import Answer, ApprovalPolicy, ApprovalRequest
 from omega_coding.builtin_tools import build_tools
+from omega_coding.commands import CommandContext, dispatch
 from omega_coding.context import measure
 from omega_coding.cost import CostTracker, price_from_env
 from omega_coding.env import USER_CONFIG, find_env_files, load_environment
 from omega_coding.history import drop_empty_failed_turns
 from omega_coding.redact import redacting_hook
+from omega_coding.status import StatusLine
 from omega_coding.system_prompt import PROJECT_INSTRUCTIONS_FILE, build_system_prompt
 from omega_coding.truncate import sweep_old_spills
 
@@ -97,10 +99,15 @@ async def _run_turn(harness: Harness, prompt: str) -> None:
     layer below. Every branch here is driven by an event that means what it says.
     """
     interrupt = _install_interrupt_handler(harness)
+    status = StatusLine()
 
     try:
-        async for event in harness.run(prompt):
-            _render(event)
+        async with status:
+            async for event in harness.run(prompt):
+                # Status first: it erases its own line before the renderer writes,
+                # so the two never share a row of the terminal.
+                status.observe(event)
+                _render(event)
     finally:
         interrupt()
 
@@ -400,22 +407,60 @@ def main() -> None:
             restored = harness.resume(session_id)
             print(f"Resumed {session_id} ({restored} messages).")
 
+    asyncio.run(
+        _repl(
+            harness=harness,
+            context=CommandContext(
+                harness=harness,
+                store=store,
+                tracker=tracker,
+                model=model,
+                system=system,
+                tools=tools,
+                hooks=hooks,
+            ),
+            model=model,
+            system=system,
+        )
+    )
+
+
+async def _repl(
+    *, harness: Harness, context: CommandContext, model: str, system: str
+) -> None:
+    """The conversation, on **one** event loop for the whole session.
+
+    Tier 2 called `asyncio.run(_run_turn(...))` inside this loop, so every prompt
+    built and tore down an event loop while the provider's HTTP client — created
+    once at startup — outlived all of them. Sharing a connection pool across event
+    loops is undefined behaviour in asyncio, and exactly the sort of thing that
+    produces a traceback nobody can reproduce on demand.
+
+    The cost of the fix is that `input` has to move off the loop, which is what
+    `_ask_in_terminal` already does for approvals and for the same reason: a
+    blocking `input` stalls everything else the loop is running.
+    """
     while True:
         try:
-            prompt = input("You: ")
+            prompt = await asyncio.to_thread(input, "You: ")
         except (EOFError, KeyboardInterrupt):
             print()
             break
 
-        if prompt.strip().lower() in {"exit", "quit"}:
-            if harness.session_id is not None:
-                print(f"Session saved: {harness.session_id} (continue with `omega -c`)")
-            break
         if not prompt.strip():
             continue
 
+        # Commands first. `None` means it was not one, so it goes to the model.
+        outcome = await dispatch(prompt, context)
+        if outcome == "exit":
+            if harness.session_id is not None:
+                print(f"Session saved: {harness.session_id} (continue with `omega -c`)")
+            break
+        if outcome == "handled":
+            continue
+
         try:
-            asyncio.run(_run_turn(harness, prompt))
+            await _run_turn(harness, prompt)
         except KeyboardInterrupt:
             # Only reachable where add_signal_handler is unavailable. The
             # transcript may now hold an unanswered tool call - the next run()
@@ -427,9 +472,9 @@ def main() -> None:
         # and #9 visible before they bite, which is what Tier 3 needs in order
         # to know where to put a threshold.
         usage = measure(
-            model=model, system=system, messages=harness.messages, tools=tools
+            model=model, system=system, messages=harness.messages, tools=context.tools
         )
-        print(f"\n  [{usage} | {tracker}]")
+        print(f"\n  [{usage} | {context.tracker}]")
         print()
 
 

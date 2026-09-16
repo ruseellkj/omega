@@ -104,32 +104,20 @@ but not on disk.*
 
 ---
 
-## Rule 5 · Run it. Paste the output.
+## Three rules live in CLAUDE.md instead
 
-This project's convention is measurement over assertion, and it has caught real bugs:
+**Verify before asserting · never invent a name · evidence for every reference claim.**
 
-- claiming always-allow could not break the fence — **disproved by running it**
-- claiming redaction covered failures — **disproved by running it**
-- claiming outside-root grants were safe — **a recursive-grant bug found by running it**
+They were here first, then moved — because they are not about explaining. Each was broken while
+*writing code*, when this skill was not loaded at all. `CLAUDE.md` loads in every session; a skill
+loads only when its description matches what was asked. Rules that must always apply belong in the
+file that is always read.
 
-Before asserting behaviour, write a ten-line script that exercises it and paste the result.
-If the output contradicts the explanation, the explanation was wrong.
-
----
-
-## Rule 6 · Never introduce a name that does not exist without saying so
-
-Two invented names (`before_record`, a hook; "Tier 2.5", a tier) sat beside six real hook
-names and two real tier names in the same answer, and cost an entire round of confusion.
-
-If naming something hypothetical, mark it in the same sentence: *"a hook that does not
-exist — call it X for now"*. Better: describe it without naming it at all.
-
-Before citing any symbol, flag, or file: **grep for it.** If it is not there, say so.
+They apply to this skill's work too. They just do not live here.
 
 ---
 
-## Rule 7 · Reconcile apparent contradictions in the same breath
+## Rule 5 · Reconcile apparent contradictions in the same breath
 
 Two true statements written near each other can read as a contradiction:
 
@@ -144,7 +132,7 @@ When two statements could clash, name the dimension that separates them **immedi
 
 ---
 
-## Rule 8 · Say what it is NOT, where a wrong model is likely
+## Rule 6 · Say what it is NOT, where a wrong model is likely
 
 Cheap, and prevents whole rounds:
 
@@ -157,7 +145,7 @@ Cheap, and prevents whole rounds:
 
 ---
 
-## Rule 9 · Do not invent hypotheticals that cannot happen
+## Rule 7 · Do not invent hypotheticals that cannot happen
 
 A table comparing "JSONL without `--resume`" against "`--resume` without JSONL" was
 nonsense: neither can occur. It taught nothing and cost a round.
@@ -168,7 +156,7 @@ delete the table.
 
 ---
 
-## Rule 10 · Explain jargon with mechanics, not more jargon
+## Rule 8 · Explain jargon with mechanics, not more jargon
 
 "Retry happens below the event boundary" means nothing on first reading.
 
@@ -179,22 +167,7 @@ Pattern: **term → what physically happens → why that matters.**
 
 ---
 
-## Rule 11 · Compare against the references, with evidence
-
-`research/pi/` and `research/tau/` are on disk. Read them — never recall them.
-
-| | Evidence |
-|---|---|
-| Pi | file and line from `research/pi/` |
-| Tau | file and line from `research/tau/` |
-| Claude Code | **closed source** — its docs, or "unknown", never a guess |
-
-Being unable to verify Claude Code is a fact worth stating plainly. Say "I cannot read it,
-so I will not guess" rather than producing a plausible row.
-
----
-
-## Rule 12 · Length is not the problem. Repetition is.
+## Rule 9 · Length is not the problem. Repetition is.
 
 He has said both *"don't overexplain"* and *"these answers are too creamy"*. Not a
 contradiction:
@@ -236,8 +209,9 @@ Every paragraph must add a fact. If it only rephrases the one above, cut it.
 - [ ] Every term's *kind* named the first time it appears
 - [ ] At least one real code excerpt with `file:line`
 - [ ] At least one concrete trace or measured output
-- [ ] Every symbol, flag and file verified to exist
-- [ ] Anything invented explicitly flagged as invented
 - [ ] No hypothetical that cannot occur
-- [ ] Claude Code claims marked as docs or unknown
+- [ ] Said what it is NOT, wherever a wrong model is likely
 - [ ] No paragraph that only restates the previous one
+
+CLAUDE.md's three universal rules still apply on top of these: nothing asserted without running
+it, nothing named that does not exist, no reference claim without a file and line.

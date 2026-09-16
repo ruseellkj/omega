@@ -6,9 +6,9 @@ Named after a physics letter, following [Pi](https://github.com/earendil-works/p
 [Tau](https://github.com/huggingface/tau) — the two MIT-licensed agents this is studied from.
 Written independently, not forked.
 
-**Currently at Tier 2 — "it is usable."** 4,654 lines of source, 289 tests, all offline.
+**Currently at Tier 2 — "it is usable."** 6,247 lines of source, 395 tests, all offline.
 
-* **[`READING-ORDER.md`](READING-ORDER.md) — start here.** All 30 files in the order to read them,
+* **[`READING-ORDER.md`](READING-ORDER.md) — start here.** All 38 files in the order to read them,
   one line each, plus the questions to hold while reading.
 * [`TIER-1.md`](TIER-1.md) — what the first tier does, and what it deliberately left out
 * [`TIER-2.md`](TIER-2.md) — what this tier adds, and where each remaining gap plugs in at Tier 3
@@ -25,15 +25,17 @@ uv sync
 uv run omega --fake                 # scripted responses — no key, no network, no credits
 uv run omega                        # Anthropic; needs ANTHROPIC_API_KEY (see below)
 uv run omega --provider openai      # OpenAI Chat Completions
-uv run omega --resume               # continue the most recent session here
+uv run omega -c                     # continue the most recent session here
+uv run omega --sessions             # list saved sessions and exit
 ```
 
 `--fake` is not a stub. It drives the entire agent — loop, harness, tools, streaming, approvals —
 through `FakeProvider`, so you can watch the whole thing work without spending anything.
 
 Useful flags: `--yes` approves tool calls automatically (it does **not** disable the
-refuse-outright list), `--no-save` skips writing a session, `--session ID` resumes a specific one,
-and `--base-url` points the OpenAI adapter at a local server:
+refuse-outright list), `--confine` refuses any path outside the working directory instead of
+asking, `--no-save` skips writing a session, `--resume ID` reopens a specific one, and
+`--base-url` points the OpenAI adapter at a local server:
 
 ```bash
 uv run omega --provider openai --base-url http://localhost:11434/v1   # Ollama, free
@@ -66,17 +68,41 @@ just the key while inheriting everything else from your global one.
 If the key is missing, omega prints the exact list of paths it searched rather than only saying it
 is unset.
 
+## In the conversation
+
+Everything above is chosen before the conversation starts. Inside it, a leading `/` addresses the
+program rather than the model, and a leading `!` addresses the shell:
+
+```
+/help            list these commands
+/sessions        saved sessions for this project
+/resume <id>     switch to another session, without restarting
+/clear           start a fresh session; the old one is kept on disk
+/cost            tokens and spend so far
+/context         how full the context window is
+/exit            leave omega
+!<command>       run a shell command — no model, no tokens
+```
+
+`exit` and `quit` still work without a slash. An unknown `/foo` is an error naming the nearest
+match rather than a prompt forwarded to a paid API, which is where both references differ.
+
+**`!cmd` has no private path to the shell.** It runs through the same `run_shell` tool the model
+uses, so it meets the same approval gate, the same refuse-outright list, the same timeout and the
+same output budget. Its output is *not* added to the conversation — Pi and Tau both add it, and
+the argument for diverging is in `src/omega_coding/commands.py`.
+
 ## Check it
 
 ```bash
-uv run pytest -q                    # 289 tests, ~1.7s, fully offline
+uv run pytest -q                    # 395 tests, ~2.9s, fully offline
 uv run mypy --strict src
 uv run ruff check .
-uv run python -m omega.evals        # smoke eval: does the assembled agent still work?
+uv run python -m omega_coding.evals # smoke eval: does the assembled agent still work?
 ```
 
 The test suite never touches the network. Every provider call is faked at the interface boundary —
-which is why `providers/fake.py` was written before the real adapter — and the two vendor SDKs are
+which is why `omega_ai/fake.py` was written before the real adapter — and the two vendor SDKs are
 faked one layer lower, in `tests/stub_anthropic.py` and `tests/stub_openai.py`, so the adapters'
 own retry and auth behaviour is testable too.
 
@@ -121,6 +147,10 @@ omega/src/
     ├── history.py        what is kept vs what is sent
     ├── context.py        how full the window is
     ├── cost.py           tokens; dollars only if you supply a price
+    ├── system_prompt.py  the standing instructions, and OMEGA.md
+    ├── commands.py       /help, /sessions, /clear … and the ! shell escape
+    ├── status.py         the working line, with truthful labels
+    ├── env.py            finds .env by walking outward from where you are
     ├── headless.py       prompt in, transcript out. No keyboard.
     ├── evals.py          the smoke eval
     └── cli.py            the composition root. Reads last.

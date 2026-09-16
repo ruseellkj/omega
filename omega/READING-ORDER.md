@@ -70,6 +70,7 @@ neither imports it.
 | 22 | `builtin_tools.py` | 365 | The four tools — read, write, edit, run — sitting behind everything above. |
 | 23 | `approval.py` | 217 | **The gate.** Fills `before_tool_call`. Note what it refuses outright versus what it asks about, and why the line is drawn where it is. |
 | 24 | `redact.py` | 101 | Keeps credentials out of the transcript. Fills `after_tool_call`. |
+| 24b | `commands.py` | 280 | **The command channel.** `/help`, `/clear`, `!cmd` — what tells the *program* something instead of asking the model. Note `dispatch` returns three things, and that `!cmd` reuses `execute_tool_call` rather than the shell. |
 | 25 | `history.py` | 42 | **Two views of history**: what is kept versus what is sent. The small sibling of the seam compaction will use at Tier 3. |
 | 26 | `context.py` | 116 | How full the context window is. Measures a problem it does not fix. |
 | 27 | `cost.py` | 96 | What the run cost. Read why it ships **no price table**. |

@@ -221,6 +221,27 @@ class Harness:
         self.repair_orphans()
         return len(self.messages)
 
+    def start_new_session(self) -> str | None:
+        """Forget the conversation and begin a new one. Returns the id left behind.
+
+        The mirror of `resume`, touching the same three pieces of state: the
+        messages, the high-water mark, and the session id.
+
+        **Nothing is deleted.** The previous transcript stays on disk, keeps its
+        place in `--sessions`, and can still be reopened with `--resume`. Erasing
+        it would make an append-only log a lie — and a `/clear` that destroys work
+        is a `/clear` people are afraid to type.
+
+        Setting `session_id` to None is the entire mechanism for starting the next
+        file: `run` already creates a session when it finds none, so this needs no
+        new path through the store.
+        """
+        previous = self.session_id
+        self.messages.clear()
+        self._persisted = 0
+        self.session_id = None
+        return previous
+
     def _flush(self) -> None:
         """Write whatever is not on disk yet.
 
