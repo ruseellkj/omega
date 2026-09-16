@@ -12,6 +12,9 @@ Written independently, not forked.
   one line each, plus the questions to hold while reading.
 * [`TIER-1.md`](TIER-1.md) — what the first tier does, and what it deliberately left out
 * [`TIER-2.md`](TIER-2.md) — what this tier adds, and where each remaining gap plugs in at Tier 3
+* [`TIER-3.md`](TIER-3.md) — the open contract: compaction, caching, and a Textual TUI
+* [`TIER-3-PLUS.md`](TIER-3-PLUS.md) — packaging, OAuth, extensions: what a product needs and a
+  study project does not
 
 Tier 1 proved the loop terminates. Tier 2 makes it safe to point at a real repository: it can be
 interrupted without corrupting the conversation, it remembers across restarts, it asks before it
