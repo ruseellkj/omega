@@ -79,8 +79,8 @@ export function Hero() {
                 <span className="text-oxblood">$ </span>
                 <span>uv run pytest -q</span>
                 {"\n"}
-                <span className="text-forest">{"  "}289 passed</span>
-                <span className="text-ink-muted"> in 1.7s</span>
+                <span className="text-forest">{"  "}395 passed</span>
+                <span className="text-ink-muted"> in 2.9s</span>
               </div>
             </Terminal>
           </div>

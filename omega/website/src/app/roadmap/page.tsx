@@ -38,7 +38,7 @@ const TIERS: {
         name: "Everything else",
         items: [
           { name: "Session branching", note: "parent_id is already on every entry", state: "planned" },
-          { name: "Search tools", note: "grep, find, ls — truncation and confinement already exist", state: "planned" },
+          { name: "Search tools", note: "grep, find, ls — truncation and path resolution already exist", state: "planned" },
           { name: "A real TUI", note: "the 10 agent events are already the contract", state: "planned" },
           { name: "Structured logging", note: "a second listener on the same event stream", state: "planned" },
           { name: "Image reading", note: "content blocks are a discriminated union", state: "planned" },
@@ -76,11 +76,11 @@ const TIERS: {
         name: "Layer 3 · Coding app",
         items: [
           { name: "edit tool", note: "exact-match replace, unique match required", state: "shipped" },
-          { name: "Path confinement", note: "one resolver, symlinks resolved before the check", state: "shipped" },
+          { name: "Path resolution", note: "one resolver, symlinks resolved before the inside/outside verdict", state: "shipped" },
           { name: "Per-path write lock", note: "keyed on the resolved path, shared by write and edit", state: "shipped" },
-          { name: "Approval gate", note: "prompts, remembers, blanket-denies the catastrophes", state: "shipped" },
+          { name: "Approval gate", note: "asks about writes, the shell, and anything outside the working directory", state: "shipped" },
           { name: "Secret redaction", note: "key-shaped strings never reach the model or a log", state: "shipped" },
-          { name: "Sessions", note: "append-only JSONL, migrate-on-read, --resume", state: "shipped" },
+          { name: "Sessions", note: "append-only JSONL under ~/.omega, migrate-on-read, -c to continue", state: "shipped" },
         ],
       },
       {

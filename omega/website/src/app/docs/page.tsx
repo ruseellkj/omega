@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Reveal } from "@/components/site/interactive";
-import { GUTTER, PageHeader } from "@/components/site/primitives";
-import { site } from "@/lib/content";
+import { ExternalArrow, GUTTER, PageHeader } from "@/components/site/primitives";
+import { sessionCommands, site } from "@/lib/content";
 
 export const metadata: Metadata = {
   title: "Docs — omega",
@@ -48,7 +48,7 @@ const SECTIONS: { title: string; lede: string; items: Item[] }[] = [
   },
   {
     title: "Guides",
-    lede: "The six things you can actually do with it today.",
+    lede: "The seven things you can actually do with it today.",
     items: [
       {
         name: "The interactive session",
@@ -57,10 +57,16 @@ const SECTIONS: { title: string; lede: string; items: Item[] }[] = [
         note: "The prompt loop, plus the two between-turns queues: steer it mid-task, or line up what comes next.",
       },
       {
+        name: "Commands in the conversation",
+        href: `${BLOB}/omega/src/omega_coding/commands.py`,
+        where: "omega_coding/commands.py",
+        note: "A leading / addresses the program, a leading ! addresses the shell. Seven commands plus !cmd — which runs through the same run_shell tool the model uses, so it meets the same approval gate.",
+      },
+      {
         name: "Sessions",
         href: `${TREE}/omega/src/omega_agent/session`,
         where: "omega_agent/session/",
-        note: "Append-only JSONL, migrated on read. Resume the last one with --resume, or a specific one with --session.",
+        note: "Append-only JSONL under ~/.omega/sessions, migrated on read. Continue the last one with -c, a specific one with --resume, and list them with --sessions.",
       },
       {
         name: "Providers and models",
@@ -96,7 +102,7 @@ const SECTIONS: { title: string; lede: string; items: Item[] }[] = [
         name: "CLI flags",
         href: `${BLOB}/omega/src/omega_coding/cli.py`,
         where: "omega_coding/cli.py",
-        note: "--fake, --yes, --resume, --session, --no-save, --provider, --base-url, --model, --max-turns. That is all nine.",
+        note: "--fake, --yes, -c/--continue, --resume, --sessions, --no-save, --confine, --provider, --base-url, --model, --max-turns. That is all of them.",
       },
       {
         name: "Built-in tools",
@@ -216,18 +222,16 @@ const NOT_YET: { name: string; note: string; when: string }[] = [
     note: "Content blocks are already a discriminated union, so there is somewhere to put it.",
     when: "Tier 3",
   },
-  { name: "Slash commands", note: "Nothing sits between you and the model.", when: "unplanned" },
-  { name: "Keyboard shortcuts", note: "Ctrl-C interrupts. That is the list.", when: "unplanned" },
   {
     name: "Config files",
-    note: "Flags only; nothing is read from disk at startup.",
+    note: "No settings file. .env and OMEGA.md are read at startup; neither configures behaviour.",
     when: "unplanned",
   },
   { name: "Skills and prompt templates", note: "No reusable prompt library.", when: "unplanned" },
   {
-    name: "Project instructions",
-    note: "No per-repo standing instructions file.",
-    when: "unplanned",
+    name: "Keyboard shortcuts beyond Ctrl-C",
+    note: "No history, no autocomplete, no palette — each needs a TUI.",
+    when: "Tier 3",
   },
   {
     name: "Extensions and themes",
@@ -242,12 +246,7 @@ function ItemLink({ item }: { item: Item }) {
     <h3 className="m-0 text-xl transition-colors duration-200 group-hover:text-oxblood">
       {item.name}
       {!internal && (
-        <span
-          aria-hidden="true"
-          className="ml-1.5 align-[0.15em] text-[0.6em] text-ink-muted transition-colors duration-200 group-hover:text-oxblood"
-        >
-          &#8599;
-        </span>
+        <ExternalArrow className="ml-1.5 text-ink-muted transition-colors duration-200 group-hover:text-oxblood" />
       )}
     </h3>
   );
@@ -292,6 +291,30 @@ export default function DocsPage() {
       </PageHeader>
 
       <div className="mt-16 grid gap-x-12 gap-y-14">
+        {/* The in-session commands, spelled out rather than linked. They are the
+            newest thing omega has and the least discoverable — there is no
+            autocomplete to find them with. */}
+        <Reveal>
+          <div className="grid gap-x-12 gap-y-6 border-t-2 border-rule-strong pt-7 md:grid-cols-12">
+            <div className="md:col-span-3">
+              <h2 className="label m-0 text-oxblood">In the conversation</h2>
+              <p className="m-0 mt-2.5 max-w-[28ch] text-sm text-ink-muted">
+                A leading <code className="font-mono">/</code> addresses the program, a leading{" "}
+                <code className="font-mono">!</code> addresses the shell. Everything else goes to
+                the model.
+              </p>
+            </div>
+            <ul className="m-0 grid list-none gap-x-10 gap-y-2.5 p-0 sm:grid-cols-2 md:col-span-9">
+              {sessionCommands.map((c) => (
+                <li key={c.cmd} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                  <code className="font-mono text-sm text-oxblood">{c.cmd}</code>
+                  <span className="text-sm text-ink-muted">{c.note}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Reveal>
+
         {SECTIONS.map((section, si) => (
           <Reveal key={section.title} delay={si * 50}>
             <div className="grid gap-x-12 gap-y-6 border-t-2 border-rule-strong pt-7 md:grid-cols-12">

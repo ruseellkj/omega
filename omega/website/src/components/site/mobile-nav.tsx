@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useId, useState } from "react";
+import { ExternalArrow } from "@/components/site/primitives";
 import { EXTERNAL, NAV } from "@/lib/nav";
 
 /**
@@ -75,12 +76,7 @@ export function MobileNav() {
                   className="label block cursor-pointer py-3.5 text-ink transition-colors duration-200 hover:text-oxblood"
                 >
                   {item.label}
-                  <span
-                    aria-hidden="true"
-                    className="ml-1.5 align-[0.15em] text-[0.8em] text-ink-muted"
-                  >
-                    &#8599;
-                  </span>
+                  <ExternalArrow className="ml-1.5 text-ink-muted" />
                 </a>
               </li>
             ))}

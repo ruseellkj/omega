@@ -4,6 +4,10 @@
  * Every number here is measured and every quote is attributable. Figures come
  * from omega/TIER-1.md and omega/TIER-2.md; commands come from omega/README.md.
  * If a claim is not in one of those files, it does not appear on the site.
+ *
+ * `measured` carries a third column because the tier figures are history. Tier 2
+ * closed at 5,489 source lines; the work since is post-Tier-2 and would be a
+ * different claim written into the same cell.
  */
 
 export const site = {
@@ -29,12 +33,29 @@ export const site = {
 export const thesis =
   "A coding agent is a program that asks a model for help, does what the model asks for, tells it what happened, and repeats until it says it is finished.";
 
-/** README.md, lines 23-26. */
+/** README.md, "Run it". Chosen before the conversation starts. */
 export const commands = [
   { cmd: "uv run omega --fake", note: "scripted responses — no key, no network, no credits" },
   { cmd: "uv run omega", note: "Anthropic Messages" },
   { cmd: "uv run omega --provider openai", note: "OpenAI Chat Completions" },
-  { cmd: "uv run omega --resume", note: "continue the most recent session here" },
+  { cmd: "uv run omega -c", note: "continue the most recent session for this project" },
+  { cmd: "uv run omega --sessions", note: "list saved sessions, newest first" },
+] as const;
+
+/**
+ * README.md, "In the conversation" — a different kind of thing from the list
+ * above, which is why it is a separate export rather than five more rows in it.
+ * Those are chosen before the conversation starts; these work inside it.
+ */
+export const sessionCommands = [
+  { cmd: "/help", note: "list these commands" },
+  { cmd: "/sessions", note: "saved sessions for this project" },
+  { cmd: "/resume <id>", note: "switch to another session, without restarting" },
+  { cmd: "/clear", note: "start a fresh session; the old one is kept on disk" },
+  { cmd: "/cost", note: "tokens and spend so far" },
+  { cmd: "/context", note: "how full the context window is" },
+  { cmd: "/exit", note: "leave omega" },
+  { cmd: "!<command>", note: "run a shell command — no model, no tokens" },
 ] as const;
 
 /** 03-production.md §1, 04-boundaries-and-layout.md §2. */
@@ -48,7 +69,7 @@ export const layers = [
   {
     n: 3,
     name: "Coding app",
-    detail: "Tools, approvals, path confinement, secret redaction, sessions.",
+    detail: "Tools, approvals, path resolution, secret redaction, sessions.",
     state: "built",
   },
   {
@@ -67,10 +88,10 @@ export const layers = [
 
 /** TIER-2.md, the comparison table at lines 14-19. */
 export const measured = [
-  { label: "Source lines", tier1: "1,577", tier2: "4,654" },
-  { label: "Test lines", tier1: "499", tier2: "4,257" },
-  { label: "Tests", tier1: "45", tier2: "289" },
-  { label: "loop.py", tier1: "151", tier2: "190" },
+  { label: "Source lines", tier1: "1,577", tier2: "5,489", today: "6,247" },
+  { label: "Test lines", tier1: "499", tier2: "5,447", today: "6,274" },
+  { label: "Tests", tier1: "45", tier2: "347", today: "395" },
+  { label: "loop.py", tier1: "151", tier2: "190", today: "190" },
 ] as const;
 
 export const providers = [
@@ -128,10 +149,10 @@ export const claims = [
   },
   {
     title: "The loop holds at 190 lines",
-    body: "It hit 249 while the between-turns queues went in. Rather than let it grow, tool dispatch was extracted to its own file. The tripwire fired and did its job.",
+    body: "It hit 249 while the between-turns queues went in. Rather than let it grow, tool dispatch was extracted to its own file. Source has since grown by 758 lines and the loop has not moved.",
   },
   {
-    title: "289 tests, none touching the network",
-    body: "Every provider call is faked at the interface boundary, which is why providers/fake.py was written before the real adapter. The suite runs in 1.7 seconds with no key.",
+    title: "395 tests, none touching the network",
+    body: "Every provider call is faked at the interface boundary, which is why omega_ai/fake.py was written before the real adapter. The suite runs in under three seconds with no key.",
   },
 ] as const;

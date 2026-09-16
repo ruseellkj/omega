@@ -36,7 +36,7 @@ const LESSONS = [
   },
   {
     title: "Write the fake before the real adapter.",
-    body: "A fake provider is not a testing convenience, it is a design check. If it is hard to write, the interface is too big. Writing it first is also why the whole suite runs offline — 289 tests, no key, no network, 1.7 seconds.",
+    body: "A fake provider is not a testing convenience, it is a design check. If it is hard to write, the interface is too big. Writing it first is also why the whole suite runs offline — 395 tests, no key, no network, under three seconds.",
   },
 ] as const;
 
@@ -56,7 +56,8 @@ export default function LessonsPage() {
             <h2 className="m-0 max-w-[18ch] text-2xl leading-snug">Tier 1 to Tier 2, measured.</h2>
             <p className="mt-4 max-w-[44ch] text-ink-muted">
               Tests grew almost three times faster than source. That ratio is the single most useful
-              number here — it is what safety actually costs.
+              number here — it is what safety actually costs. The last column is the work since
+              Tier 2 closed, where the only figure that did not move is the loop.
             </p>
           </div>
 
@@ -67,7 +68,8 @@ export default function LessonsPage() {
                   <th className="label py-3 pr-6 font-medium text-ink-muted">&nbsp;</th>
                   <th className="label py-3 pr-6 font-medium text-ink-muted">Tier 1</th>
                   <th className="label py-3 pr-6 font-medium text-oxblood">Tier 2</th>
-                  <th className="label py-3 font-medium text-ink-muted">×</th>
+                  <th className="label py-3 pr-6 font-medium text-ink-muted">×</th>
+                  <th className="label py-3 font-medium text-ink-muted">Today</th>
                 </tr>
               </thead>
               <tbody>
@@ -79,9 +81,10 @@ export default function LessonsPage() {
                       <td className="py-2.5 pr-6 text-ink-muted">{m.label}</td>
                       <td className="tnum py-2.5 pr-6 font-mono text-ink-muted">{m.tier1}</td>
                       <td className="tnum py-2.5 pr-6 font-mono">{m.tier2}</td>
-                      <td className="tnum py-2.5 font-mono text-ink-muted">
+                      <td className="tnum py-2.5 pr-6 font-mono text-ink-muted">
                         {(b / a).toFixed(1)}
                       </td>
+                      <td className="tnum py-2.5 font-mono text-ink-muted">{m.today}</td>
                     </tr>
                   );
                 })}

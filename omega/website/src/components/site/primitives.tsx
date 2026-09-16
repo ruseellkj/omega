@@ -12,6 +12,39 @@ import { Reveal } from "@/components/site/interactive";
 export const GUTTER = "px-6 md:px-12";
 
 /**
+ * The mark on a link that leaves the site.
+ *
+ * Was `&#8599;` — a font glyph, so its size, weight and baseline were whatever
+ * the rendering font happened to give it, and in the serif face it came out
+ * long and thin. A path has no font to disagree with: `size-[0.55em]` is the
+ * size, on every platform.
+ *
+ * The geometry is Lucide's `arrow-up-right` (`lucide-react@1.34.0`, ISC),
+ * inlined rather than imported — two paths do not need a component, and this
+ * keeps the icon out of the bundle. ISC also asks nothing of the page; the
+ * Flaticon and Vecteezy free tiers want visible attribution, and Font Awesome
+ * Free is CC BY 4.0, which is a licence footer on every page in exchange for
+ * an arrow.
+ */
+export function ExternalArrow({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={`inline-block size-[0.55em] shrink-0 align-[0.06em] ${className}`}
+    >
+      <path d="M7 7h10v10" />
+      <path d="M7 17 17 7" />
+    </svg>
+  );
+}
+
+/**
  * A page section: standard gutter, standard rhythm, revealed on scroll.
  * `last` drops the bottom rule and adds the closing space.
  */

@@ -66,7 +66,7 @@ const PARTS = [
   {
     role: "the environment",
     symbol: "build_tools()",
-    line: "Tools, approvals, path confinement, secret redaction. Everything that touches your machine.",
+    line: "Tools, approvals, path checks, secret redaction. Everything that touches your machine.",
   },
   {
     role: "the face",
