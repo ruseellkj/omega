@@ -242,6 +242,29 @@ class Harness:
         self.session_id = None
         return previous
 
+    def replace_transcript(self, messages: Sequence[AgentMessage]) -> int:
+        """Swap the working transcript for a smaller one. Returns how many remain.
+
+        The third method touching the same state as `resume` and
+        `start_new_session`, and the one with the subtlest failure mode.
+
+        **`_persisted` must move too.** It is a high-water mark, not a count of
+        what is on disk in general: `_flush` writes `messages[_persisted:]`.
+        Shrink `messages` from 20 to 4 and leave the mark at 20, and the next
+        sixteen real messages are silently never written — a data-loss bug that
+        no test of compaction itself would catch. Setting it to the new length
+        means "everything currently held is accounted for".
+
+        **Nothing is deleted from disk.** The session file is append-only and
+        still holds every original entry; later messages append after them, so
+        `--resume` returns the *full* history rather than the compacted view. The
+        file is the record, this list is the working set, and they are allowed to
+        differ — the same two-views split `history.py` describes, one level out.
+        """
+        self.messages[:] = list(messages)
+        self._persisted = len(self.messages)
+        return len(self.messages)
+
     def _flush(self) -> None:
         """Write whatever is not on disk yet.
 

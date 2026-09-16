@@ -31,7 +31,7 @@ Tau's equivalent of `/clear` is `/new`; Pi's is also `/new`, though its handler
 is still called `handleClearCommand`.
 
 **An unknown `/foo` is an error.** Both references forward it to the model as an
-ordinary prompt. With seven commands and a metered API on the other side, a typo
+ordinary prompt. With eight commands and a metered API on the other side, a typo
 deserves a correction rather than an invoice.
 
 **`!cmd` does not touch the conversation — and both references disagree.** In
@@ -64,6 +64,7 @@ from omega_agent.session import SessionStore
 from omega_agent.tool_runner import execute_tool_call
 from omega_agent.tools import Tool
 from omega_agent.types import ToolCall
+from omega_coding.compact import Compactor
 from omega_coding.context import measure
 from omega_coding.cost import CostTracker
 
@@ -93,6 +94,10 @@ class CommandContext:
     #: escape would call `tool.execute` directly and skip the approval gate
     #: entirely — see `run_shell_escape`, where that was a real bug.
     hooks: AgentHooks
+    #: Filled by `cli.py`. None when compaction is not wired, which is every
+    #: caller that builds a context without one - `/compact` says so rather than
+    #: pretending to work.
+    compactor: Compactor | None = None
     args: str = ""
 
 
@@ -201,6 +206,65 @@ async def _context(context: CommandContext) -> Outcome:
     return "handled"
 
 
+async def _compact(context: CommandContext) -> Outcome:
+    """Shrink the conversation now, instead of waiting for the ceiling.
+
+    **Why this exists when compaction is already automatic.** The automatic pass
+    fires at 80% — mid-task, whenever the next request happens to cross it. This
+    is the "I am about to start something big, clear the decks first" button, and
+    it takes a target: `/compact 40` aims at 40% of the window rather than 80%.
+
+    Both references have the same pair (Pi `slash-commands.ts:38`, Tau
+    `commands.py:230`), and both take an argument — theirs is free text steering a
+    model-written summary. omega's compaction is mechanical, so there is nothing
+    to instruct; a percentage is the parameter that means something here, and the
+    divergence is deliberate.
+
+    Unlike the automatic pass, this one edits the **transcript**, not just the
+    request. Nothing is lost: the session file is append-only and still holds
+    every original message.
+    """
+    compactor = context.compactor
+    if compactor is None:
+        print("\n  Compaction is not configured for this session.\n")
+        return "handled"
+
+    fraction = compactor.threshold
+    target = context.args.strip().rstrip("%")
+    if target:
+        try:
+            percent = float(target)
+        except ValueError:
+            print(f"\n  Usage: /compact [percent]. '{target}' is not a number.\n")
+            return "handled"
+        if not 1 <= percent <= 100:
+            print("\n  Usage: /compact [percent], between 1 and 100.\n")
+            return "handled"
+        fraction = percent / 100
+
+    messages = context.harness.messages
+    before_messages, before_tokens = len(messages), compactor.estimate(messages)
+
+    compacted = compactor.compact_to(messages, fraction)
+    after_tokens = compactor.estimate(compacted)
+
+    if after_tokens >= before_tokens:
+        # Truthful rather than encouraging. A command that always claims success
+        # teaches you to stop reading it.
+        print(f"\n  Already at ~{before_tokens:,} tokens - nothing worth dropping.\n")
+        return "handled"
+
+    context.harness.replace_transcript(compacted)
+    freed = before_tokens - after_tokens
+    print(
+        f"\n  Compacted to {int(fraction * 100)}%: "
+        f"{before_messages} messages (~{before_tokens:,} tokens) "
+        f"-> {len(compacted)} (~{after_tokens:,}), {freed:,} freed."
+    )
+    print("  The session file still has everything - /resume reopens the full history.\n")
+    return "handled"
+
+
 async def _exit(context: CommandContext) -> Outcome:
     return "exit"
 
@@ -212,6 +276,7 @@ COMMANDS: tuple[Command, ...] = (
     Command("clear", "/clear", "start a fresh session; the old one is kept", _clear),
     Command("cost", "/cost", "tokens and spend so far", _cost),
     Command("context", "/context", "how full the context window is", _context),
+    Command("compact", "/compact [pct]", "shrink the conversation now", _compact),
     Command("exit", "/exit", "leave omega", _exit),
 )
 
@@ -289,7 +354,7 @@ async def dispatch(text: str, context: CommandContext) -> Outcome | None:
 def _unknown(name: str) -> None:
     """Say so, and guess what was meant.
 
-    Both references forward an unknown `/foo` to the model. With seven commands and
+    Both references forward an unknown `/foo` to the model. With eight commands and
     a metered API on the other side, a typo is worth a correction rather than a
     charge.
     """

@@ -226,10 +226,19 @@ class Compactor:
         #: of the window before messages get any of it.
         self._overhead = estimate_request_tokens(system=system, messages=[], tools=tools)
 
+    def budget_for(self, fraction: float) -> int:
+        """Tokens the *messages* may occupy at `fraction` of the window.
+
+        A parameter rather than a constant because `/compact` lets you aim lower
+        on purpose — "get me to 40% before I start something big" is a different
+        request from "keep me under the automatic ceiling".
+        """
+        return max(0, int(self.window * fraction) - self._overhead)
+
     @property
     def budget(self) -> int:
-        """Tokens the *messages* may occupy, once the fixed cost is paid."""
-        return max(0, int(self.window * self.threshold) - self._overhead)
+        """The automatic ceiling: what `__call__` holds the context under."""
+        return self.budget_for(self.threshold)
 
     def estimate(self, messages: list[AgentMessage]) -> int:
         """What these messages cost, on the same scale as `budget`."""
@@ -241,10 +250,27 @@ class Compactor:
             # The common case, and it must stay free: compaction that fires when
             # it is not needed is lost fidelity for nothing.
             return list(messages)
+        return self._fit(list(messages), self.budget)
 
-        units = _units(list(messages))
+    def compact_to(self, messages: list[AgentMessage], fraction: float) -> list[AgentMessage]:
+        """Compact to an explicit fraction of the window. What `/compact` calls.
+
+        Unconditional, unlike `__call__`: a manual command that quietly did
+        nothing because you happened to be under the ceiling would be worse than
+        no command. Whether anything actually changed is the caller's to report.
+        """
+        return self._fit(list(messages), self.budget_for(fraction))
+
+    def _fit(self, messages: list[AgentMessage], budget: int) -> list[AgentMessage]:
+        """The algorithm.
+
+        `budget` is passed rather than read off `self`, so the automatic ceiling
+        and a manual target share one implementation. Two code paths that could
+        disagree about what "compacted" means would be one bug waiting.
+        """
+        units = _units(messages)
         if len(units) <= 1:
-            return self._shrink(list(messages))
+            return self._shrink(messages, budget)
 
         head, rest = units[0], units[1:]
 
@@ -261,7 +287,7 @@ class Compactor:
             # `and kept` keeps the newest turn whatever it costs. A request
             # missing what the model just did is useless; an oversized one is
             # merely expensive, and `_shrink` still has a say.
-            if used + cost + reserve > self.budget and kept:
+            if used + cost + reserve > budget and kept:
                 break
             kept.append(unit)
             used += cost
@@ -277,11 +303,11 @@ class Compactor:
         # Dropping whole turns is not always enough — one turn can exceed the
         # whole budget on its own. Shrinking cannot orphan anything, because it
         # changes content and never the shape.
-        if self.estimate(sent) > self.budget:
-            sent = self._shrink(sent)
+        if self.estimate(sent) > budget:
+            sent = self._shrink(sent, budget)
         return sent
 
-    def _shrink(self, messages: list[AgentMessage]) -> list[AgentMessage]:
+    def _shrink(self, messages: list[AgentMessage], budget: int) -> list[AgentMessage]:
         """Cut content, keeping every message in place.
 
         Shrinking is the safe half of compaction: the list keeps its length and
@@ -294,12 +320,12 @@ class Compactor:
         an agent that half-remembers what it was asked is worse than one that
         admits the window is full.
         """
-        shrunk = self._shrink_results(messages)
-        if self.estimate(shrunk) <= self.budget:
+        shrunk = self._shrink_results(messages, budget)
+        if self.estimate(shrunk) <= budget:
             return shrunk
-        return self._trim_prose(shrunk)
+        return self._trim_prose(shrunk, budget)
 
-    def _shrink_results(self, messages: list[AgentMessage]) -> list[AgentMessage]:
+    def _shrink_results(self, messages: list[AgentMessage], budget: int) -> list[AgentMessage]:
         """Pass one: excerpt tool results."""
         positions = [i for i, m in enumerate(messages) if isinstance(m, ToolResultMessage)]
         if not positions:
@@ -308,7 +334,7 @@ class Compactor:
         fixed = sum(
             self.estimate([m]) for m in messages if not isinstance(m, ToolResultMessage)
         )
-        share = max(MIN_RESULT_TOKENS, (self.budget - fixed) // len(positions))
+        share = max(MIN_RESULT_TOKENS, (budget - fixed) // len(positions))
 
         shrunk = list(messages)
         for position in positions:
@@ -317,7 +343,7 @@ class Compactor:
             shrunk[position] = _excerpt(result, share)
         return shrunk
 
-    def _trim_prose(self, messages: list[AgentMessage]) -> list[AgentMessage]:
+    def _trim_prose(self, messages: list[AgentMessage], budget: int) -> list[AgentMessage]:
         """Pass two: excerpt assistant prose.
 
         Reached only when cutting tool output was not enough — a chatty model, or
@@ -341,7 +367,7 @@ class Compactor:
         fixed = sum(
             self.estimate([m]) for i, m in enumerate(messages) if i not in trimmable
         )
-        share = max(MIN_RESULT_TOKENS, (self.budget - fixed) // len(positions))
+        share = max(MIN_RESULT_TOKENS, (budget - fixed) // len(positions))
 
         trimmed = list(messages)
         for position in positions:

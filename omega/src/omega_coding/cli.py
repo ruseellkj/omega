@@ -351,6 +351,11 @@ def main() -> None:
 
     tracker = CostTracker(price_from_env())
 
+    # One instance, two callers: the automatic pass below and `/compact`. Two
+    # compactors could disagree about the budget, which is the kind of drift that
+    # only shows up as "why did it compact at a different point that time".
+    compactor = Compactor(model=model, system=system, tools=tools)
+
     # Policy arrives as hooks, so the loop knows nothing about approvals or
     # secrets. Swapping either is a change to this composition, nothing else.
     hooks = AgentHooks(
@@ -367,7 +372,7 @@ def main() -> None:
         # Tier 3, beginner failure #1. Constructed here rather than taking the
         # model and tools as hook arguments, because widening `ContextTransform`
         # would touch `hooks.py`, `loop.py` and `history.py` to spare one line.
-        transform_context=Compactor(model=model, system=system, tools=tools),
+        transform_context=compactor,
     )
 
     store = None if args.no_save else JsonlSessionStore(root)
@@ -423,6 +428,7 @@ def main() -> None:
                 system=system,
                 tools=tools,
                 hooks=hooks,
+                compactor=compactor,
             ),
             model=model,
             system=system,

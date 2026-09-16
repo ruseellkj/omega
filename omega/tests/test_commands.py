@@ -25,11 +25,12 @@ import pytest
 from omega_agent.harness import Harness
 from omega_agent.hooks import AgentHooks, ToolCallDecision
 from omega_agent.session import JsonlSessionStore
-from omega_agent.types import ToolCall
+from omega_agent.types import ToolCall, UserMessage
 from omega_ai.fake import FakeProvider, text_turn
 from omega_coding.approval import ApprovalPolicy
 from omega_coding.builtin_tools import build_tools
 from omega_coding.commands import COMMANDS, CommandContext, dispatch
+from omega_coding.compact import Compactor
 from omega_coding.cost import CostTracker
 
 
@@ -360,3 +361,154 @@ async def test_a_denied_call_is_reported_not_raised(tmp_path: Path) -> None:
     """A `ToolCallDecision` refusal must not escape into the REPL as a crash."""
     decision = ToolCallDecision(allowed=False, reason="declined")
     assert decision.allowed is False
+
+
+# ---------------------------------------------------------------------- /compact
+
+
+def _big_conversation() -> list[Any]:
+    """A transcript large enough that compaction has something to do."""
+    from omega_agent.types import AssistantMessage, ToolResultMessage, UserMessage
+
+    messages: list[Any] = [UserMessage(content="port the parser")]
+    for i in range(10):
+        messages.append(
+            AssistantMessage(
+                model="m",
+                stop_reason="toolUse",
+                content=[ToolCall(id=f"k{i}", name="read_file", arguments={})],
+            )
+        )
+        messages.append(
+            ToolResultMessage(tool_call_id=f"k{i}", tool_name="read_file", content="data " * 600)
+        )
+    return messages
+
+
+def _compactor(**overrides: Any) -> Compactor:
+    settings: dict[str, Any] = {"model": "m", "system": "s", "tools": [], "window": 3_000}
+    settings.update(overrides)
+    return Compactor(**settings)
+
+
+async def test_compact_shrinks_the_live_conversation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The point of the command: do it now, not when the ceiling is crossed."""
+    compactor = _compactor()
+    context = _context(tmp_path, compactor=compactor)
+    context.harness.messages.extend(_big_conversation())
+    before = len(context.harness.messages)
+
+    assert await dispatch("/compact", context) == "handled"
+
+    assert len(context.harness.messages) < before
+    printed = capsys.readouterr().out
+    assert "freed" in printed
+    assert "session file still has everything" in printed
+
+
+async def test_compact_accepts_a_target_percentage(tmp_path: Path) -> None:
+    """`/compact 20` aims lower than the automatic ceiling.
+
+    This is where omega diverges from both references. Their `/compact` takes
+    free-text instructions because theirs writes a summary with the model;
+    omega's is mechanical, so a percentage is the only argument that means
+    anything.
+    """
+    compactor = _compactor()
+    loose = _context(tmp_path, compactor=compactor)
+    loose.harness.messages.extend(_big_conversation())
+    tight = _context(tmp_path, compactor=compactor)
+    tight.harness.messages.extend(_big_conversation())
+
+    await dispatch("/compact 80", loose)
+    await dispatch("/compact 20", tight)
+
+    assert compactor.estimate(tight.harness.messages) < compactor.estimate(loose.harness.messages)
+
+
+async def test_compact_rejects_a_target_that_is_not_a_number(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    context = _context(tmp_path, compactor=_compactor())
+    context.harness.messages.extend(_big_conversation())
+    before = list(context.harness.messages)
+
+    assert await dispatch("/compact loads", context) == "handled"
+
+    assert context.harness.messages == before, "a typo must not cost the conversation"
+    assert "not a number" in capsys.readouterr().out
+
+
+async def test_compact_rejects_an_out_of_range_target(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    context = _context(tmp_path, compactor=_compactor())
+
+    assert await dispatch("/compact 900", context) == "handled"
+    assert "between 1 and 100" in capsys.readouterr().out
+
+
+async def test_compact_says_so_when_there_is_nothing_to_drop(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Truthful beats encouraging. A command that always claims success is one
+    you stop reading."""
+    context = _context(tmp_path, compactor=_compactor())
+    context.harness.messages.append(UserMessage(content="hello"))
+
+    assert await dispatch("/compact", context) == "handled"
+
+    assert "nothing worth dropping" in capsys.readouterr().out
+
+
+async def test_compact_says_so_when_it_is_not_configured(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert await dispatch("/compact", _context(tmp_path)) == "handled"
+    assert "not configured" in capsys.readouterr().out
+
+
+async def test_compact_keeps_writing_to_the_session_afterwards(
+    tmp_path: Path,
+) -> None:
+    """**The test that matters, and the bug it names.**
+
+    `_persisted` is a high-water mark: `_flush` writes `messages[_persisted:]`.
+    Shrink the list from 21 to 4 and leave the mark at 21, and the next
+    seventeen real messages are never written to disk — silently, with no error,
+    and no test of compaction itself would notice. `replace_transcript` moves the
+    mark for exactly this reason.
+    """
+    context = _context(tmp_path, compactor=_compactor())
+    context.harness.messages.extend(_big_conversation())
+
+    # The turn is what *flushes*, and the bug only bites once the mark is higher
+    # than the compacted length. Extending the list without running would leave
+    # the mark at 0 and the test would pass against a broken implementation -
+    # which is exactly what the first version of it did.
+    async for _ in context.harness.run("first"):
+        pass
+    session = context.harness.session_id
+    assert session is not None
+    mark_before = context.harness._persisted
+    assert mark_before > 20, "the mark is high before compacting"
+
+    await dispatch("/compact", context)
+
+    # The precise condition the bug needs: fewer messages than the old mark. Left
+    # unmoved, `_flush` writes `messages[mark_before:]` and that slice is empty.
+    assert len(context.harness.messages) < mark_before
+
+    async for _ in context.harness.run("after compacting"):
+        pass
+
+    assert context.store is not None
+    on_disk = context.store.load(session)
+    assert any(
+        isinstance(m, UserMessage) and m.content == "after compacting" for m in on_disk
+    ), "the turn taken after /compact reached the session file"
+    assert any(
+        isinstance(m, UserMessage) and m.content == "first" for m in on_disk
+    ), "and the original is still there - nothing was deleted"

@@ -73,6 +73,15 @@ Measured end to end through a real turn: a 21-message transcript estimated at
 while the transcript itself *grew* from 20 messages to 22. That is the two-views
 split doing exactly what it was designed for.
 
+`/compact [pct]` is the manual half — Pi (`slash-commands.ts:38`) and Tau
+(`commands.py:230`) both have the same pair. Theirs take free-text instructions
+because theirs write a model-authored summary; omega's is mechanical, so a
+*percentage* is the argument that means something: `/compact 40` clears the decks
+before a big task rather than waiting for the 80% ceiling to be crossed mid-work.
+Unlike the automatic pass it edits the transcript, not just the request — and
+`harness.replace_transcript` moves the `_persisted` high-water mark, without which
+every message after a compaction is silently never written to disk.
+
 It is mechanical, not model-based: drop the oldest whole turns, then shrink what
 remains — tool output first, because it is the only thing that can be recovered
 by running the tool again; assistant prose second; **the user's own messages
