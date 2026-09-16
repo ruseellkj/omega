@@ -80,6 +80,23 @@ def to_anthropic_tools(tools: list[Tool]) -> list[dict[str, Any]]:
     ]
 
 
+def _cacheable_system(system: str) -> list[dict[str, Any]]:
+    """The system prompt as one cacheable block — beginner failure #9.
+
+    A plain string cannot carry a marker, so the prompt becomes a one-element
+    list of content blocks with `cache_control` on it. The text is byte-identical
+    either way; only the envelope changes.
+
+    **Whether this actually caches anything depends on size.** Anthropic ignores
+    the marker below a per-model minimum (1,024 tokens for Sonnet and Opus, 2,048
+    for Haiku), and omega's prefix is measured at 3,753 characters — an estimated
+    938 tokens, which straddles that line depending on how the schema JSON
+    tokenizes. No error is raised when it is ignored; the request simply is not
+    cached. Adding the Tier 3 search tools puts it comfortably over.
+    """
+    return [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+
+
 def _assistant_content(message: AssistantMessage) -> list[dict[str, Any]]:
     blocks: list[dict[str, Any]] = []
     for block in message.content:
@@ -292,7 +309,18 @@ class AnthropicProvider:
         async with self._client.messages.stream(
             model=model,
             max_tokens=self._max_tokens,
-            system=system,
+            # One breakpoint, not two. Anthropic's cache hierarchy is
+            # tools -> system -> messages, so a marker at the end of `system`
+            # covers the tool schemas sitting in front of it. Breakpoints are
+            # capped at four and every write is billed above normal input, so
+            # spending a second one to cache the same bytes twice would cost
+            # rather than save.
+            #
+            # Nothing marks the *messages*: the conversation changes every turn,
+            # so a marker there writes a fresh entry each time instead of reading
+            # an old one. That is the enhancement, not the fix for failure #9,
+            # which is specifically the system prompt and the schema block.
+            system=cast("Any", _cacheable_system(system)),
             # The translators return plain dicts on purpose: it keeps them
             # testable without constructing SDK objects. Casting here is the
             # honest place to reconcile that with the client's typed params.
@@ -311,7 +339,18 @@ class AnthropicProvider:
                 # variable first defeats type narrowing — the checker can no
                 # longer tell which event shape it is holding.
                 if raw.type == "message_start":
-                    partial.usage = Usage(input=raw.message.usage.input_tokens, output=0)
+                    # Both fields are optional on the wire and absent on older
+                    # API versions, so they are read defensively rather than
+                    # indexed. Zero means "not reported", which reads the same as
+                    # "nothing cached" and is the safe conflation: it never
+                    # overstates a saving.
+                    reported = raw.message.usage
+                    partial.usage = Usage(
+                        input=reported.input_tokens,
+                        output=0,
+                        cache_write=getattr(reported, "cache_creation_input_tokens", 0) or 0,
+                        cache_read=getattr(reported, "cache_read_input_tokens", 0) or 0,
+                    )
                     yield AssistantStartEvent(partial=partial.model_copy(deep=True))
 
                 elif raw.type == "content_block_start":
@@ -400,8 +439,13 @@ class AnthropicProvider:
 
                 elif raw.type == "message_delta":
                     raw_stop = raw.delta.stop_reason
-                    partial.usage = Usage(
-                        input=partial.usage.input, output=raw.usage.output_tokens
+                    # `model_copy`, not `Usage(...)`. Rebuilding it here dropped
+                    # every field the constructor did not mention, which silently
+                    # reset the cache counts recorded at `message_start` — so the
+                    # start event reported a cache hit and the final message,
+                    # the one anything downstream actually reads, reported none.
+                    partial.usage = partial.usage.model_copy(
+                        update={"output": raw.usage.output_tokens}
                     )
 
         final = partial.model_copy(deep=True)

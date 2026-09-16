@@ -379,8 +379,20 @@ class OpenAIProvider:
                     return
 
                 if chunk.usage is not None:
+                    # **Nothing is sent to earn this.** OpenAI caches long
+                    # prefixes server-side with no marker and no opt-in, which is
+                    # the whole difference from Anthropic: there the saving has to
+                    # be asked for, here it only has to be *reported*.
+                    #
+                    # Read through two optional levels, because `--base-url`
+                    # points this same adapter at Ollama, vLLM and Groq and none
+                    # of them promise the field. Missing reads as zero, which
+                    # understates a saving rather than inventing one.
+                    details = getattr(chunk.usage, "prompt_tokens_details", None)
                     partial.usage = Usage(
-                        input=chunk.usage.prompt_tokens, output=chunk.usage.completion_tokens
+                        input=chunk.usage.prompt_tokens,
+                        output=chunk.usage.completion_tokens,
+                        cache_read=getattr(details, "cached_tokens", 0) or 0,
                     )
 
                 if not chunk.choices:

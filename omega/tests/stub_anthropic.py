@@ -48,13 +48,20 @@ def _tool_path() -> list[Any]:
     ]
 
 
-def _happy_path() -> list[Any]:
-    """The minimum well-formed stream: a message that says "hi" and stops."""
+def _happy_path(cache_read: int = 0, cache_write: int = 0) -> list[Any]:
+    """The minimum well-formed stream: a message that says "hi" and stops.
+
+    The cache counters are attached only when non-zero, so the default stream
+    keeps the shape of an API that never heard of prompt caching — which is also
+    the shape Ollama, vLLM and Groq present through the OpenAI adapter. The
+    adapter has to survive both.
+    """
+    usage: Any = SimpleNamespace(input_tokens=11)
+    if cache_read or cache_write:
+        usage.cache_read_input_tokens = cache_read
+        usage.cache_creation_input_tokens = cache_write
     return [
-        SimpleNamespace(
-            type="message_start",
-            message=SimpleNamespace(usage=SimpleNamespace(input_tokens=11)),
-        ),
+        SimpleNamespace(type="message_start", message=SimpleNamespace(usage=usage)),
         SimpleNamespace(
             type="content_block_start", index=0, content_block=SimpleNamespace(type="text")
         ),
@@ -113,7 +120,11 @@ class _Messages:
             # Fails on connect, before anything is emitted - so a retry is safe.
             return _Stream([], fail_after=0, error=client.error)
 
-        events = _tool_path() if client.script == "tool" else _happy_path()
+        events = (
+            _tool_path()
+            if client.script == "tool"
+            else _happy_path(client.cache_read, client.cache_write)
+        )
         return _Stream(events, fail_after=client.fail_midstream_after, error=client.error)
 
 
@@ -131,8 +142,12 @@ class StubClient:
         fail_midstream_after: int | None = None,
         error: Callable[[], Exception] = lambda: ConnectionError("stub"),
         script: str = "text",
+        cache_read: int = 0,
+        cache_write: int = 0,
     ) -> None:
         self.script = script
+        self.cache_read = cache_read
+        self.cache_write = cache_write
         self.fail_times = fail_times
         self.fail_midstream_after = fail_midstream_after
         self.error = error

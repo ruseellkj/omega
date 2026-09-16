@@ -53,18 +53,45 @@ def price_from_env() -> Price | None:
 class CostTracker:
     """Sums token usage across a run, and prices it if it can."""
 
-    __slots__ = ("_price", "input_tokens", "output_tokens", "turns")
+    __slots__ = (
+        "_price",
+        "cache_read_tokens",
+        "cache_write_tokens",
+        "input_tokens",
+        "output_tokens",
+        "turns",
+    )
 
     def __init__(self, price: Price | None = None) -> None:
         self._price = price
         self.input_tokens = 0
         self.output_tokens = 0
+        self.cache_write_tokens = 0
+        self.cache_read_tokens = 0
         self.turns = 0
 
     def record(self, message: AssistantMessage) -> None:
         self.input_tokens += message.usage.input
         self.output_tokens += message.usage.output
+        self.cache_write_tokens += message.usage.cache_write
+        self.cache_read_tokens += message.usage.cache_read
         self.turns += 1
+
+    @property
+    def cached_fraction(self) -> float:
+        """How much of the input arrived from cache, 0.0 to 1.0.
+
+        **The number that says whether failure #9 is actually fixed.** Sending a
+        cache marker is easy and proves nothing; this rising above zero on the
+        second turn of a session is the evidence.
+
+        Expect zero on the first turn of every session — an entry has to be
+        written before it can be read, and the ephemeral lifetime is minutes, so
+        a fresh session always starts cold. Zero here is not a fault.
+        """
+        if self.input_tokens <= 0:
+            return 0.0
+        return self.cache_read_tokens / self.input_tokens
 
     def observe(self, event: AgentEvent) -> None:
         """Usable directly as a harness listener.

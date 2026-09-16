@@ -188,6 +188,20 @@ async def _clear(context: CommandContext) -> Outcome:
 async def _cost(context: CommandContext) -> Outcome:
     tracker = context.tracker
     print(f"\n  {tracker}   across {tracker.turns} model response(s)")
+
+    # Reported separately from the totals rather than folded into them: cache
+    # reads are billed at a different rate, and omega ships no price table, so
+    # quietly discounting them would be inventing the number this module exists
+    # to refuse to invent.
+    if tracker.cache_read_tokens or tracker.cache_write_tokens:
+        print(
+            f"  cache: {tracker.cache_read_tokens:,} read, "
+            f"{tracker.cache_write_tokens:,} written "
+            f"({tracker.cached_fraction:.0%} of input served from cache)"
+        )
+    else:
+        print("  cache: nothing yet - the first turn of a session always writes before it reads.")
+
     if tracker.dollars is None:
         print("  No price set - export OMEGA_PRICE_INPUT and OMEGA_PRICE_OUTPUT for a total.")
     print()

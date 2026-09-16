@@ -84,10 +84,24 @@ ContentBlock = Annotated[
 # ---------------------------------------------------------------------- usage
 
 class Usage(WireModel):
-    """Token accounting. Populated when the provider reports it, zero otherwise."""
+    """Token accounting. Populated when the provider reports it, zero otherwise.
+
+    The two cache fields are how beginner failure #9 becomes *checkable*. Sending
+    a cache marker is easy and proves nothing; `cache_read` above zero on the
+    second turn of a session is the only evidence the marker did anything.
+
+    Both default to zero, so a provider that reports nothing — and every session
+    written before these existed — stays valid without a schema bump.
+    """
 
     input: int = 0
     output: int = 0
+    #: Tokens written into the cache. Billed *above* normal input on Anthropic,
+    #: so a run that only ever writes costs more, not less.
+    cache_write: int = 0
+    #: Tokens served from the cache, at a fraction of the input price. This is
+    #: the number that means the feature is working.
+    cache_read: int = 0
 
 
 # ------------------------------------------------------------------ stop reason

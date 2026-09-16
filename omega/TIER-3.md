@@ -44,12 +44,33 @@ These are the scorecard. Everything else in this file is a feature; these two ar
 | Missing | What it costs today | The seam | Seam status |
 |---|---|---|---|
 | ~~**Compaction** — failure **#1**~~ **LANDED** | Long tasks died at the context limit; Tier 2 could only *show* the wall coming, via `/context` | `transform_context` (`hooks.py:93`), now filled by `compact.py` | **filled** |
-| **Prompt caching** — failure **#9** | Every turn re-bills the system prompt and the whole tool schema block | Not a hook — a **constraint**. Cache markers need a byte-identical prefix, which is why `OMEGA.md` is prepended once at startup and never regenerated per turn | n/a |
+| **Prompt caching** — failure **#9** — *markers sent, hit unconfirmed* | Every turn re-bills the system prompt and the whole tool schema block | Not a hook — a **constraint**. Cache markers need a byte-identical prefix, which is why `OMEGA.md` is prepended once at startup and never regenerated per turn | n/a |
 
 Closing these two takes the beginner scorecard from **7 of 9** to **9 of 9**, which is the whole
 point of the tier and the reason it comes before anything on the Tier 3+ list.
 
-**#1 is now closed.** The scorecard stands at **8 of 9**; prompt caching is the last one.
+**#1 is now closed.** The scorecard stands at **8 of 9**.
+
+**#9 is not closed yet, and the distinction matters.** The cache marker is built,
+sent and tested — but *sending a marker is not a saving*. Failure #9 is "it costs
+more than it should", and the only evidence that closes it is
+`cache_read_input_tokens` above zero coming back from a real provider on the
+second turn of a session. That has not been run: the Anthropic key on this
+machine currently returns `credit balance is too low`, which also blocked an
+exact token count.
+
+Two things are therefore recorded rather than claimed:
+
+* **The prefix may be below the minimum.** Anthropic ignores a marker when the
+  cached prefix is under 1,024 tokens (2,048 for Haiku). omega's system prompt
+  plus tool schemas measure **3,753 characters** — 901 of prompt and 2,852 of
+  JSON schema. At the chars/4 estimate that is 938 tokens, *below* the line;
+  JSON tokenizes worse than prose, so the real figure is plausibly 1,000-1,250.
+  It straddles the threshold. No error is raised either way — an ignored marker
+  simply does nothing, which is the worst possible failure mode to guess about.
+* **Tier 3's own search tools settle it.** `grep`, `find` and `ls` add three more
+  schemas to the same prefix and put it comfortably clear. Caching becomes
+  reliably effective as a side effect of a row further down this table.
 
 ### Everything else Tier 3 adds
 

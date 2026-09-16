@@ -345,3 +345,27 @@ async def test_the_openai_adapter_closes_the_stream_it_opened() -> None:
         pass
 
     assert client.last_stream.closed, "an abandoned stream must be closed too"
+
+
+# ----------------------------- promise 5: cache accounting, however it arrives
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS)
+async def test_cache_fields_default_to_zero_when_the_vendor_is_silent(
+    adapter: Adapter,
+) -> None:
+    """Neither stub reports cache figures, which is the point.
+
+    Anthropic omitted them before prompt caching existed, and the OpenAI adapter
+    also serves Ollama, vLLM and Groq through `--base-url` — none of which
+    promise `prompt_tokens_details`. Both adapters must read the absence as zero
+    rather than raising, so that a missing saving is understated and never
+    invented.
+    """
+    provider, _client = adapter()
+    events = await _drain(provider)
+
+    final = [e for e in events if e.type == "done"][-1].message
+    assert final.usage.cache_read == 0
+    assert final.usage.cache_write == 0
+    assert final.usage.input > 0, "ordinary accounting still works"
