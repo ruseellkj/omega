@@ -18,31 +18,44 @@ from typing import Any
 import stub_anthropic
 from omega_agent.events import AssistantDoneEvent
 from omega_agent.tools import Tool
-from omega_agent.types import UserMessage
+from omega_agent.types import AssistantMessage, TextContent, UserMessage
 from omega_ai.anthropic import AnthropicProvider, _cacheable_system
 
 
-def _tool() -> Tool:
+def _tool(name: str = "read_file") -> Tool:
     async def run(**_: object) -> str:
         return "ok"
 
     return Tool(
-        name="read_file",
-        description="Read a file",
+        name=name,
+        description=f"The {name} tool",
         parameters={"type": "object", "properties": {"path": {"type": "string"}}},
         execute=run,  # type: ignore[arg-type]
     )
 
 
-async def _run(client: Any) -> list[Any]:
+def _is_marked(message: dict[str, Any]) -> bool:
+    """Does this message carry a cache breakpoint on its final block?"""
+    content = message.get("content")
+    if not isinstance(content, list) or not content:
+        return False
+    return isinstance(content[-1], dict) and "cache_control" in content[-1]
+
+
+async def _run(
+    client: Any,
+    *,
+    messages: list[Any] | None = None,
+    tools: list[Tool] | None = None,
+) -> list[Any]:
     provider = AnthropicProvider(client=client, api_key="k")
     return [
         event
         async for event in provider.stream_response(
             model="claude-sonnet-5",
             system="be helpful",
-            messages=[UserMessage(content="hi")],
-            tools=[_tool()],
+            messages=messages if messages is not None else [UserMessage(content="hi")],
+            tools=tools if tools is not None else [_tool()],
         )
     ]
 
@@ -76,18 +89,94 @@ async def test_the_marker_actually_reaches_the_wire() -> None:
     assert sent[0]["cache_control"] == {"type": "ephemeral"}
 
 
-async def test_only_one_breakpoint_is_spent() -> None:
-    """Anthropic caps breakpoints at four and bills every write above normal
-    input. The hierarchy is tools -> system -> messages, so marking `system`
-    already covers the schemas in front of it; a second marker would pay twice
-    to cache the same bytes.
+async def test_the_last_tool_carries_a_marker_and_the_others_do_not() -> None:
+    """One marker caches every tool.
+
+    A breakpoint hashes the whole prefix up to and including its own block, so
+    marking the final tool covers all of them. Marking each would spend the
+    entire budget of four on prefixes that the next marker already covers.
+    """
+    client = stub_anthropic.StubClient()
+    await _run(client, tools=[_tool("read_file"), _tool("write_file"), _tool("run_shell")])
+
+    tools = client.calls[0]["tools"]
+    assert "cache_control" not in tools[0]
+    assert "cache_control" not in tools[1]
+    assert tools[-1]["cache_control"] == {"type": "ephemeral"}
+
+
+async def test_the_conversation_tail_is_marked() -> None:
+    """**The breakpoint that actually saves money.**
+
+    The system prompt and schemas are a few hundred fixed tokens. The
+    conversation is everything else, it grows every turn, and it is re-sent in
+    full each time. omega's first pass at caching marked only the static prefix,
+    which is why it saved almost nothing.
     """
     client = stub_anthropic.StubClient()
     await _run(client)
 
+    last = client.calls[0]["messages"][-1]
+    assert last["content"][-1]["cache_control"] == {"type": "ephemeral"}
+
+
+async def test_the_previous_request_boundary_is_marked_too() -> None:
+    """Two windows, because Anthropic's lookback is finite.
+
+    The search for a reusable prefix checks at most **20 block positions** back
+    from a breakpoint and then stops. A long turn can push the previous write
+    out of that window, and the next request re-pays for the whole conversation.
+    Marking where the last request ended opens a second window at a position
+    already known to hold an entry.
+    """
+    client = stub_anthropic.StubClient()
+    await _run(
+        client,
+        messages=[
+            UserMessage(content="first question"),
+            AssistantMessage(model="m", stop_reason="stop", content=[TextContent(text="answer")]),
+            UserMessage(content="second question"),
+        ],
+    )
+
+    sent = client.calls[0]["messages"]
+    marked = [i for i, m in enumerate(sent) if _is_marked(m)]
+
+    assert len(marked) == 2, "this tail and the previous one"
+    assert marked[-1] == len(sent) - 1, "the newest is always one of them"
+
+
+async def test_the_budget_of_four_is_never_exceeded() -> None:
+    """Anthropic rejects a fifth breakpoint. The split is 1 system + 1 tools + 2
+    messages, and a long transcript must not drift past it."""
+    client = stub_anthropic.StubClient()
+    history: list[Any] = []
+    for i in range(8):
+        history.append(UserMessage(content=f"question {i}"))
+        history.append(
+            AssistantMessage(
+                model="m", stop_reason="stop", content=[TextContent(text=f"answer {i}")]
+            )
+        )
+    await _run(client, messages=history)
+
     call = client.calls[0]
-    assert not any("cache_control" in tool for tool in call["tools"]), "tools inherit"
-    assert not any("cache_control" in str(m) for m in call["messages"]), "messages change"
+    total = (
+        sum("cache_control" in block for block in call["system"])
+        + sum("cache_control" in tool for tool in call["tools"])
+        + sum(_is_marked(m) for m in call["messages"])
+    )
+    assert total <= 4, f"spent {total} of Anthropic's four breakpoints"
+
+
+async def test_a_transcript_with_no_assistant_turn_marks_only_the_tail() -> None:
+    """The first request of a session has no previous boundary to mark, so it
+    emits one marker rather than inventing a second."""
+    client = stub_anthropic.StubClient()
+    await _run(client, messages=[UserMessage(content="the very first question")])
+
+    marked = [m for m in client.calls[0]["messages"] if _is_marked(m)]
+    assert len(marked) == 1
 
 
 # -------------------------------------------------------------- the reply side

@@ -51,26 +51,63 @@ point of the tier and the reason it comes before anything on the Tier 3+ list.
 
 **#1 is now closed.** The scorecard stands at **8 of 9**.
 
-**#9 is not closed yet, and the distinction matters.** The cache marker is built,
-sent and tested — but *sending a marker is not a saving*. Failure #9 is "it costs
-more than it should", and the only evidence that closes it is
-`cache_read_input_tokens` above zero coming back from a real provider on the
-second turn of a session. That has not been run: the Anthropic key on this
-machine currently returns `credit balance is too low`, which also blocked an
-exact token count.
+**#9 — the first attempt was a half-measure, and the second one is the real
+thing.** Worth recording both, because the mistake is instructive.
 
-Two things are therefore recorded rather than claimed:
+**What the first pass did.** One breakpoint, on the system prompt. That caches
+the system prompt and the tool schemas — together about 3,753 characters, a few
+hundred tokens, *fixed*. It ignored the conversation, which is everything else,
+grows every turn, and is re-sent in full each time. It cached the rounding error
+and left the bill alone.
 
-* **The prefix may be below the minimum.** Anthropic ignores a marker when the
-  cached prefix is under 1,024 tokens (2,048 for Haiku). omega's system prompt
-  plus tool schemas measure **3,753 characters** — 901 of prompt and 2,852 of
-  JSON schema. At the chars/4 estimate that is 938 tokens, *below* the line;
-  JSON tokenizes worse than prose, so the real figure is plausibly 1,000-1,250.
-  It straddles the threshold. No error is raised either way — an ignored marker
-  simply does nothing, which is the worst possible failure mode to guess about.
-* **Tier 3's own search tools settle it.** `grep`, `find` and `ls` add three more
-  schemas to the same prefix and put it comfortably clear. Caching becomes
-  reliably effective as a side effect of a row further down this table.
+**Why the "wait for search tools" framing was backwards.** The first pass noted
+that omega's static prefix sits near Anthropic's minimum cacheable size and
+concluded that adding `grep`/`find`/`ls` would push it over. True, and beside the
+point: **once the conversation is cached the minimum stops mattering**, because a
+conversation passes 1,024 tokens within a turn or two whatever the prompt size.
+The size problem was a symptom of caching the wrong thing.
+
+**The documented minimums, corrected.** An earlier note here said "1,024 for
+Sonnet and Opus, 2,048 for Haiku". Both halves were wrong:
+
+| Model | Minimum cacheable prefix |
+|---|---|
+| Opus 5, Fable 5, Mythos 5 | **512** |
+| **Sonnet 5** (omega's default), Opus 4.8, Sonnet 4.6 | **1,024** |
+| Opus 4.7, Haiku 3.5 | 2,048 |
+| Opus 4.6, Opus 4.5, Haiku 4.5 | 4,096 |
+
+Below the minimum the marker is ignored silently — no error — which is why the
+only real check is `cache_read_input_tokens` in the response.
+
+**What it does now**, following Tau (`tau_ai/anthropic.py:468-518`) rather than
+inventing a scheme. Anthropic allows **four** breakpoints; omega spends them:
+
+| Breakpoint | Where | Why there |
+|---|---|---|
+| 1 | end of `system` | caches system, and the tools behind it |
+| 2 | the **last** tool | tools and the prompt change at different rates; editing `OMEGA.md` should not evict the schemas |
+| 3 | the **last message** | the conversation — where the money actually is |
+| 4 | the **previous request's tail** | the second lookback window |
+
+**Why the fourth one exists.** Anthropic searches at most **20 block positions**
+back from a breakpoint for a reusable prefix, then stops. A long turn can push
+the previous write outside that window, and the request re-pays for the entire
+conversation. Marking where the last request ended opens a second window at a
+position already known to hold an entry. Tau reached this first; Pi marks only
+one message position (`anthropic-messages.ts:1256-1277`) and is the weaker of the
+two here.
+
+**Cost, so the trade is explicit.** A 5-minute cache write is **1.25x** base
+input and a read is **0.1x**, so the second request on a cached prefix already
+pays the write back (1.25 + 0.1 = 1.35 against 2.0 uncached). The 1-hour TTL
+doubles the write and is not used: it pays off only for a subscription that is
+not billed per token, which is Tau's reason for choosing it and not omega's.
+
+**Still not closed.** Markers are sent and tested; a cache *hit* is unproven,
+because the key on this machine returns `credit balance is too low`. Two turns
+against a live provider with `cache_read_input_tokens > 0` closes it. The
+scorecard stays at **8 of 9** until then.
 
 ### Everything else Tier 3 adds
 

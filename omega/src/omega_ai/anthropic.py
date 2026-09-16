@@ -80,21 +80,132 @@ def to_anthropic_tools(tools: list[Tool]) -> list[dict[str, Any]]:
     ]
 
 
+#: Anthropic allows four `cache_control` markers per request. The split below is
+#: Tau's (`tau_ai/anthropic.py:61-66`) and the reasoning is the documented one:
+#: sections that change at *different frequencies* deserve their own breakpoint.
+MAX_CACHE_BREAKPOINTS = 4
+SYSTEM_BREAKPOINTS = 1
+TOOLS_BREAKPOINTS = 1
+MESSAGE_BREAKPOINTS = MAX_CACHE_BREAKPOINTS - SYSTEM_BREAKPOINTS - TOOLS_BREAKPOINTS
+
+#: The marker itself. Copied at every attach site so no two breakpoints share a
+#: dict — mutating one in place would silently move the others.
+CACHE_CONTROL: dict[str, Any] = {"type": "ephemeral"}
+
+#: Blocks Anthropic will accept a breakpoint on. A marker anywhere else is
+#: rejected outright, so the position is checked rather than assumed.
+CACHEABLE_BLOCK_TYPES = frozenset({"text", "image", "tool_result"})
+
+
 def _cacheable_system(system: str) -> list[dict[str, Any]]:
-    """The system prompt as one cacheable block — beginner failure #9.
+    """The system prompt as one cacheable block.
 
     A plain string cannot carry a marker, so the prompt becomes a one-element
-    list of content blocks with `cache_control` on it. The text is byte-identical
-    either way; only the envelope changes.
-
-    **Whether this actually caches anything depends on size.** Anthropic ignores
-    the marker below a per-model minimum (1,024 tokens for Sonnet and Opus, 2,048
-    for Haiku), and omega's prefix is measured at 3,753 characters — an estimated
-    938 tokens, which straddles that line depending on how the schema JSON
-    tokenizes. No error is raised when it is ignored; the request simply is not
-    cached. Adding the Tier 3 search tools puts it comfortably over.
+    list of content blocks. The text is byte-identical either way; only the
+    envelope changes, which matters because a single changed character
+    invalidates every prefix hashed behind it.
     """
-    return [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+    return [{"type": "text", "text": system, "cache_control": dict(CACHE_CONTROL)}]
+
+
+def _cacheable_tools(tools: list[Tool]) -> list[dict[str, Any]]:
+    """Tool definitions with a breakpoint on the last one.
+
+    One marker, on the final tool, caches **all** of them: a breakpoint hashes
+    the whole prefix up to and including its own block. Marking every tool would
+    spend four breakpoints caching prefixes each already covered by the next.
+
+    Separate from the system breakpoint even though system sits behind tools in
+    the hierarchy, because the two change at different rates — editing `OMEGA.md`
+    rewrites the system prompt while the schemas stay put, and a tools breakpoint
+    survives that.
+    """
+    definitions = to_anthropic_tools(tools)
+    if definitions:
+        definitions[-1] = {**definitions[-1], "cache_control": dict(CACHE_CONTROL)}
+    return definitions
+
+
+def _mark_breakpoint(message: dict[str, Any]) -> None:
+    """Attach a marker to a user message's final content block, if eligible.
+
+    Only user messages: they are where a request *ends*, so they are the only
+    positions whose prefix is worth hashing. An ineligible block is skipped
+    rather than forced — a rejected request costs more than a missed cache.
+    """
+    if message.get("role") != "user":
+        return
+
+    content = message.get("content")
+    if isinstance(content, str):
+        if content:
+            message["content"] = [
+                {"type": "text", "text": content, "cache_control": dict(CACHE_CONTROL)}
+            ]
+        return
+
+    if not isinstance(content, list) or not content:
+        return
+    last = content[-1]
+    if not isinstance(last, dict) or last.get("type") not in CACHEABLE_BLOCK_TYPES:
+        return
+    content[-1] = {**last, "cache_control": dict(CACHE_CONTROL)}
+
+
+def _previous_request_boundary(messages: list[dict[str, Any]]) -> int | None:
+    """Where the previous request's message list ended.
+
+    The transcript is append-only and every request stops just before the
+    assistant message it produced, so the last user message *before* the final
+    assistant turn is exactly where the previous request's tail breakpoint was
+    placed — and therefore where a cache entry already exists.
+    """
+    last_assistant = None
+    for index in range(len(messages) - 1, -1, -1):
+        if messages[index].get("role") == "assistant":
+            last_assistant = index
+            break
+    if last_assistant is None:
+        return None
+
+    for index in range(last_assistant - 1, -1, -1):
+        if messages[index].get("role") == "user":
+            return index
+    return None
+
+
+def _apply_message_breakpoints(messages: list[dict[str, Any]]) -> None:
+    """Mark this request's tail and the previous one's, in place.
+
+    **This is where prompt caching actually pays.** The system prompt and the
+    schemas are a fixed few hundred tokens; the conversation is everything else
+    and it is re-sent in full on every single turn. Caching only the static
+    prefix saves a rounding error — which is what omega did in its first pass at
+    this, and why that pass was wrong.
+
+    **Two breakpoints, not one.** Anthropic searches at most **20 block
+    positions back** from a breakpoint for a reusable prefix, then gives up. A
+    long turn can push the previous write out of that window, and the request
+    then re-pays for the whole conversation. Marking where the last request ended
+    opens a second lookback window at a position that is known to have been
+    written, so the hit survives a wide turn.
+
+    Either position may be ineligible, in which case fewer markers are emitted —
+    missing a cache is cheap, an invalid request is not.
+    """
+    if not messages:
+        return
+
+    positions = {len(messages) - 1}
+    boundary = _previous_request_boundary(messages)
+    if boundary is not None:
+        positions.add(boundary)
+
+    if len(positions) > MESSAGE_BREAKPOINTS:  # pragma: no cover - defensive
+        raise AssertionError("message breakpoints exceed the Anthropic budget of four")
+
+    for position in positions:
+        _mark_breakpoint(messages[position])
 
 
 def _assistant_content(message: AssistantMessage) -> list[dict[str, Any]]:
@@ -306,26 +417,25 @@ class AnthropicProvider:
         if self._auth is not None:
             self._client.api_key = await self._auth()
 
+        # Built before the call so the breakpoints are visible in one place.
+        # `to_anthropic_messages` stays a pure translator; marking happens here,
+        # because where a request *ends* is a caching question, not a wire-format
+        # one.
+        payload_messages = to_anthropic_messages(messages)
+        _apply_message_breakpoints(payload_messages)
+
         async with self._client.messages.stream(
             model=model,
             max_tokens=self._max_tokens,
-            # One breakpoint, not two. Anthropic's cache hierarchy is
-            # tools -> system -> messages, so a marker at the end of `system`
-            # covers the tool schemas sitting in front of it. Breakpoints are
-            # capped at four and every write is billed above normal input, so
-            # spending a second one to cache the same bytes twice would cost
-            # rather than save.
-            #
-            # Nothing marks the *messages*: the conversation changes every turn,
-            # so a marker there writes a fresh entry each time instead of reading
-            # an old one. That is the enhancement, not the fix for failure #9,
-            # which is specifically the system prompt and the schema block.
+            # Four breakpoints, spent deliberately: system, the last tool, and
+            # the two message tails. Anthropic hashes the whole prefix up to and
+            # including a marked block, so each one buys everything behind it.
             system=cast("Any", _cacheable_system(system)),
             # The translators return plain dicts on purpose: it keeps them
             # testable without constructing SDK objects. Casting here is the
             # honest place to reconcile that with the client's typed params.
-            messages=cast("Iterable[MessageParam]", to_anthropic_messages(messages)),
-            tools=cast("Iterable[ToolParam]", to_anthropic_tools(tools)),
+            messages=cast("Iterable[MessageParam]", payload_messages),
+            tools=cast("Iterable[ToolParam]", _cacheable_tools(tools)),
         ) as stream:
             async for raw in stream:
                 if signal is not None and signal.is_cancelled():
