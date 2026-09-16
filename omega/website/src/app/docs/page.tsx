@@ -183,9 +183,26 @@ const SECTIONS: { title: string; lede: string; items: Item[] }[] = [
         note: "Including the estimates that were wrong, which are still in the file.",
       },
       {
+        name: "Tier 3 — the open contract",
+        href: `${BLOB}/omega/TIER-3.md`,
+        where: "omega/TIER-3.md",
+        note: "Written before the code, like the two before it. Compaction, prompt caching, and a Textual TUI — with the seam each one plugs into, and the single row whose seam does not exist yet.",
+      },
+      {
+        name: "Tier 3+ — the product backlog",
+        href: `${BLOB}/omega/TIER-3-PLUS.md`,
+        where: "omega/TIER-3-PLUS.md",
+        note: "Packaging, OAuth, extensions, themes. Every entry names the Tau module that proves the category is real work rather than a guess.",
+      },
+      {
         name: "Roadmap",
         href: "/roadmap",
         note: "Tier 3, and the two failures it has to close.",
+      },
+      {
+        name: "Releases",
+        href: "/releases",
+        note: "Every tag, with the measured size of the code at each one.",
       },
     ],
   },

@@ -6,6 +6,7 @@ export const NAV = [
   { label: "Rant", href: "/rant" },
   { label: "Lessons", href: "/lessons" },
   { label: "Roadmap", href: "/roadmap" },
+  { label: "Releases", href: "/releases" },
 ] as const;
 
 /** Off-site links. Kept apart from NAV so both surfaces can set them off. */

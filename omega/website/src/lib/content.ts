@@ -88,9 +88,9 @@ export const layers = [
 
 /** TIER-2.md, the comparison table at lines 14-19. */
 export const measured = [
-  { label: "Source lines", tier1: "1,577", tier2: "5,489", today: "6,247" },
-  { label: "Test lines", tier1: "499", tier2: "5,447", today: "6,274" },
-  { label: "Tests", tier1: "45", tier2: "347", today: "395" },
+  { label: "Source lines", tier1: "1,577", tier2: "4,654", today: "6,247" },
+  { label: "Test lines", tier1: "499", tier2: "4,257", today: "6,274" },
+  { label: "Tests", tier1: "45", tier2: "289", today: "395" },
   { label: "loop.py", tier1: "151", tier2: "190", today: "190" },
 ] as const;
 
@@ -139,6 +139,54 @@ export const upcoming = [
   { name: "Structured logging", seam: "a second listener on the same event stream" },
   { name: "Image reading", seam: "content blocks are a discriminated union" },
   { name: "Subagents or plan mode", seam: "a subagent is the headless driver, called from a tool" },
+] as const;
+
+/**
+ * Tags, newest first. Every figure is measured from the tag itself
+ * (`git ls-tree -r <tag>`), not from the tier documents, so a row cannot drift
+ * from the code it points at.
+ *
+ * These are git tags and GitHub Releases. They are **not** downloads — omega is
+ * not on any package index yet, and the page says so rather than implying a
+ * `pip install` that does not exist.
+ */
+export const releases = [
+  {
+    tag: "tier-2-final",
+    date: "2026-09-16",
+    title: "Commands, a shell escape, and one event loop",
+    body: "Everything Tier 2 closed with, plus the work that followed it: a location-aware approval gate in place of the hard path fence, seven slash commands and a ! shell escape, and a single REPL event loop that removed a long-standing traceback.",
+    lines: "6,247",
+    files: "38",
+    tests: "395",
+  },
+  {
+    tag: "tier-2",
+    date: "2026-08-24",
+    title: "Safe to point at a real repository",
+    body: "It can be interrupted without corrupting the conversation, it remembers across restarts, it asks before it destroys anything, and the provider abstraction stopped being a claim and became a measured result.",
+    lines: "4,654",
+    files: "32",
+    tests: "289",
+  },
+  {
+    tag: "tier-2-pre-exam",
+    date: "2026-08-24",
+    title: "The checkpoint before the provider exam",
+    body: "The headless driver and the smoke eval, tagged deliberately before a second provider was added — so the claim that adding one changed nothing above Layer 1 could be checked against something rather than asserted.",
+    lines: "4,160",
+    files: "31",
+    tests: "—",
+  },
+  {
+    tag: "tier-1",
+    date: "2026-08-22",
+    title: "A working agent with real layers",
+    body: "It streams, it calls tools, it stops correctly, and its provider is swappable. Not safe, not persistent, not interruptible — each of which became a Tier 2 addition to a seam that already existed, not a rewrite.",
+    lines: "1,577",
+    files: "12",
+    tests: "45",
+  },
 ] as const;
 
 /** What the layering bought, stated as claims rather than adjectives. */
