@@ -76,6 +76,20 @@ ContextTransform = Callable[[list[AgentMessage]], Awaitable[list[AgentMessage]]]
 #: Supplies messages between turns. Returning an empty list means "nothing to add".
 MessageSource = Callable[[], Awaitable[list[AgentMessage]]]
 
+#: Consulted once for each message as it is **recorded** — whatever produced it,
+#: and before it reaches disk or the next request. Returns the message to keep.
+#:
+#: The distinction from `after_tool_call` is the whole reason this exists.
+#: That one fires when a *tool* hands back a value, which covers tool output and
+#: nothing else: a credential in the model's own answer, or in the user's own
+#: prompt, went to the transcript unmasked and back to the provider on every
+#: later turn. Two earlier bypasses were patched individually before it became
+#: clear the attachment point was wrong rather than incomplete.
+#:
+#: Consulted by the harness, not the loop — the harness owns the transcript, so
+#: it is the one place every writer passes through. `loop.py` gains nothing.
+RecordMessage = Callable[[AgentMessage], Awaitable[AgentMessage]]
+
 
 @dataclass(frozen=True, slots=True)
 class AgentHooks:
@@ -93,3 +107,6 @@ class AgentHooks:
     transform_context: ContextTransform | None = None
     get_steering_messages: MessageSource | None = None
     get_follow_up_messages: MessageSource | None = None
+    # Fires as a message is recorded, before persistence and before the next
+    # request. Redaction fills it; a transcript logger would fill it too.
+    before_record: RecordMessage | None = None

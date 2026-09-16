@@ -119,7 +119,7 @@ scorecard stays at **8 of 9** until then.
 | **Structured logging** | Debugging means reading print output | A second listener on the same event stream. Not a new mechanism | **exists** |
 | **Image reading** | Screenshots cannot be handed to the model | `types.py` content blocks are a discriminated union; an image block is an addition, not a change | **exists** |
 | **Subagents *or* plan mode** | No task decomposition | `before_tool_call` plus the headless driver. A subagent **is** the headless driver, called from a tool | **exists** |
-| **Redaction at the transcript boundary** | Redaction sits on `after_tool_call`, which fires only when a tool *returns a value*. Two paths go around it | A **new hook slot** in `harness.py`, firing when a message is recorded rather than when a tool returns | **does not exist** |
+| ~~**Redaction at the transcript boundary**~~ **LANDED** | Redaction sat on `after_tool_call`, which fires only when a tool *returns a value*. Four paths went around it | `before_record` in `hooks.py`, consulted by `harness._record` | **built** |
 
 ### Compaction — landed
 
@@ -156,6 +156,44 @@ two deliberate refusals — the user's own words exceeding the budget (74), or t
 `MIN_RESULT_TOKENS` floor multiplied out on an absurdly small window (19,
 overshooting by 2 tokens). The trade is stated in the module: **validity is
 absolute, size is best-effort.**
+
+### Redaction at the transcript boundary — landed
+
+The only row here that needed a seam that did not exist, which is why it went
+early rather than mid-tier: structured logging and subagents would both have been
+built against the wrong shape.
+
+`TIER-2.md` predicted the failure exactly — *"a third way around will appear the
+next time a new path to the transcript is added"*. Running it found **two** more,
+neither of which involves a tool at all:
+
+* the model repeating a key back in its own answer
+* the user pasting one into a prompt
+
+Both reached the transcript unmasked, were written to disk, and were re-sent to
+the provider on every later turn — with redaction wired and working exactly as
+designed. Measured before the fix:
+
+```
+model echoed a key  -> present in transcript: True
+user typed a key    -> present in transcript: True
+```
+
+and after:
+
+```
+model echoed a key  -> present in transcript: False
+user typed a key    -> present in transcript: False
+what the model now sees: here is my key [redacted Anthropic API key], check it
+```
+
+**The fix is the attachment point, not another patch.** `before_record` is a
+seventh hook consulted by `harness._record` as each message is recorded, whatever
+produced it — driven by a high-water mark for the same reason persistence is, so
+the loop and `repair_orphans` are both covered without knowing it exists.
+`loop.py` gained zero lines. The two earlier patches stay: defence in depth, and
+`after_tool_call` still masks a result before the model reads it, one step
+earlier than recording.
 
 ### The ordering constraint
 

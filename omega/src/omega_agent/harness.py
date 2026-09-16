@@ -107,6 +107,12 @@ class Harness:
         #: mark catches every writer without any of them knowing about storage.
         self._persisted = 0
 
+        #: The same trick, one step earlier. Counts how much of `messages` has
+        #: been through `before_record`. Separate from `_persisted` because
+        #: recording must happen even with no store — `--no-save` still sends the
+        #: transcript to a provider, so a key in it is still a key leaked.
+        self._recorded = 0
+
     def add_listener(self, listener: AgentListener) -> None:
         """Subscribe to the agent events. Boundary D, and it only goes one way."""
         self._listeners.append(listener)
@@ -216,6 +222,11 @@ class Harness:
         self.messages[:] = self.store.load(session_id)
         self._persisted = len(self.messages)
 
+        # Deliberately 0, not len(). What is on disk was redacted on the way in
+        # *if* this harness wrote it — a session written before `before_record`
+        # existed was not, and resuming is the one chance to clean it.
+        self._recorded = 0
+
         # Anything the repair adds is beyond the high-water mark, so it is
         # written on the next flush and the session is only repaired once.
         self.repair_orphans()
@@ -239,6 +250,7 @@ class Harness:
         previous = self.session_id
         self.messages.clear()
         self._persisted = 0
+        self._recorded = 0
         self.session_id = None
         return previous
 
@@ -263,7 +275,35 @@ class Harness:
         """
         self.messages[:] = list(messages)
         self._persisted = len(self.messages)
+        self._recorded = len(self.messages)
         return len(self.messages)
+
+    async def _record(self) -> None:
+        """Offer every new message to `before_record`, then persist.
+
+        **The seam redaction actually wanted.** `after_tool_call` fires when a
+        *tool* returns a value, which is one of several ways into the transcript;
+        this fires on the transcript itself, so it covers all of them — the
+        model's own answer, the user's prompt, a synthesized interrupt note, and
+        anything a later tier adds.
+
+        Driven by a high-water mark for the same reason persistence is: the loop
+        appends straight to `messages` and so does `repair_orphans`, so counting
+        how far we have got catches every writer without any of them knowing this
+        exists.
+
+        Replaces rather than mutates. A hook returning a new message means the
+        caller's object is never edited underneath anything holding a reference,
+        which is the same guarantee `transform_context` gives one layer up.
+        """
+        if self.hooks.before_record is not None:
+            while self._recorded < len(self.messages):
+                index = self._recorded
+                self.messages[index] = await self.hooks.before_record(self.messages[index])
+                self._recorded += 1
+        else:
+            self._recorded = len(self.messages)
+        self._flush()
 
     def _flush(self) -> None:
         """Write whatever is not on disk yet.
@@ -299,7 +339,7 @@ class Harness:
             self.session_id = self.store.create_session(model=self.model)
 
         self.messages.append(UserMessage(content=prompt))
-        self._flush()
+        await self._record()
 
         async for event in run_agent_loop(
             provider=self.provider,
@@ -313,7 +353,7 @@ class Harness:
         ):
             for listener in self._listeners:
                 listener(event)
-            self._flush()
+            await self._record()
             yield event
 
-        self._flush()
+        await self._record()

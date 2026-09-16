@@ -39,7 +39,7 @@ from omega_coding.context import measure
 from omega_coding.cost import CostTracker, price_from_env
 from omega_coding.env import USER_CONFIG, find_env_files, load_environment
 from omega_coding.history import drop_empty_failed_turns
-from omega_coding.redact import redacting_hook
+from omega_coding.redact import redact_message, redacting_hook
 from omega_coding.status import StatusLine
 from omega_coding.system_prompt import PROJECT_INSTRUCTIONS_FILE, build_system_prompt
 from omega_coding.truncate import sweep_old_spills
@@ -366,6 +366,10 @@ def main() -> None:
             confine=args.confine,
         ),
         after_tool_call=redacting_hook,
+        # The same masking, at the point it actually belongs. `after_tool_call`
+        # only ever saw tool output; this sees every message, so a key in the
+        # model's answer or in your own prompt is masked too.
+        before_record=redact_message,
         # Keep failed turns in the transcript, out of the request. The simpler
         # sibling of the seam compaction fills below.
         convert_to_llm=drop_empty_failed_turns,

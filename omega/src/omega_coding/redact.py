@@ -23,10 +23,20 @@ Two ordering decisions matter:
 
 from __future__ import annotations
 
+import json
 import re
+from typing import Any
 
 from omega_agent.tools import ToolResult
-from omega_agent.types import ToolCall
+from omega_agent.types import (
+    AgentMessage,
+    AssistantMessage,
+    TextContent,
+    ThinkingContent,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
+)
 
 #: Specific, high-confidence shapes. Anthropic is listed before OpenAI because
 #: the OpenAI pattern would otherwise swallow `sk-ant-...` and mislabel it.
@@ -99,3 +109,67 @@ async def redacting_hook(call: ToolCall, result: ToolResult) -> ToolResult:
     details = dict(result.details or {})
     details["redacted"] = found
     return ToolResult(content=cleaned, details=details)  # type: ignore[arg-type]
+
+
+async def redact_message(message: AgentMessage) -> AgentMessage:
+    """`before_record`: mask credentials in any message, whatever produced it.
+
+    **Why this exists alongside `redacting_hook`.** That one fills
+    `after_tool_call`, which fires only when a *tool* hands back a value. Two
+    other routes into the transcript had no cover at all and were found by
+    running it rather than reading it:
+
+    * the model repeating a key back in its own answer
+    * the user pasting one into a prompt
+
+    Both went to disk and back to the provider on every later turn. `TIER-2.md`
+    predicted exactly this — "a third way around will appear the next time a new
+    path to the transcript is added" — so the fix is the attachment point, not
+    another patch.
+
+    **Returns a copy, never edits.** The harness swaps the returned message into
+    its list; mutating the argument would change an object other code may already
+    be holding. A message with nothing to mask is returned unchanged, so the
+    common case allocates nothing.
+
+    `ThinkingContent` is passed through untouched. Its `signature` is an opaque
+    token that must return verbatim or multi-turn reasoning breaks
+    (`types.py:59-61`), and the thinking text travels with it.
+    """
+    if isinstance(message, UserMessage):
+        cleaned, found = redact(message.content)
+        return message.model_copy(update={"content": cleaned}) if found else message
+
+    if isinstance(message, ToolResultMessage):
+        blocks = [TextContent(text=redact(b.text)[0]) for b in message.content]
+        changed = any(
+            new.text != old.text
+            for new, old in zip(blocks, message.content, strict=True)
+        )
+        return message.model_copy(update={"content": blocks}) if changed else message
+
+    if isinstance(message, AssistantMessage):
+        rebuilt: list[Any] = []
+        changed = False
+        for block in message.content:
+            if isinstance(block, TextContent):
+                cleaned, found = redact(block.text)
+                if found:
+                    rebuilt.append(TextContent(text=cleaned))
+                    changed = True
+                    continue
+            elif isinstance(block, ToolCall):
+                # Arguments are how a key travels *into* a tool - `run_shell`
+                # with the secret inline is the ordinary case, and it is recorded
+                # long before any result comes back.
+                cleaned_args, found = redact(json.dumps(block.arguments))
+                if found:
+                    rebuilt.append(block.model_copy(update={"arguments": json.loads(cleaned_args)}))
+                    changed = True
+                    continue
+            elif isinstance(block, ThinkingContent):
+                pass  # signature must return verbatim; see the docstring
+            rebuilt.append(block)
+        return message.model_copy(update={"content": rebuilt}) if changed else message
+
+    return message
