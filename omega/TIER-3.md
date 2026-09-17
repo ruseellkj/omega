@@ -136,7 +136,7 @@ scorecard stays at **8 of 9** until then.
 | **A real TUI** | Print output cannot show a diff, a spinner, or a sidebar — and cannot accept a keystroke mid-turn | The 10 agent events (`agent_events.py:49-139`) | **exists** |
 | ~~**Search tools**~~ **LANDED** | The model read whole files to find one line, and shelled out for the rest | `list_files`, `find_files`, `search_files` in `builtin_tools.py` | **filled** |
 | **Session branching** | You can rewind by reading the JSONL, but not fork and navigate | `parent_id` is already written on every entry (`session/entries.py`). Tier 3 adds `tree.py` — `path_to_entry`, cycle detection | **exists** |
-| **Structured logging** | Debugging means reading print output | A second listener on the same event stream. Not a new mechanism | **exists** |
+| ~~**Structured logging**~~ **LANDED** | Debugging meant reading print output — which a TUI removes | `eventlog.py`, a second listener on the same event stream | **filled** |
 | **Image reading** | Screenshots cannot be handed to the model | `types.py` content blocks are a discriminated union; an image block is an addition, not a change | **exists** |
 | **Subagents *or* plan mode** | No task decomposition | `before_tool_call` plus the headless driver. A subagent **is** the headless driver, called from a tool | **exists** |
 | ~~**Redaction at the transcript boundary**~~ **LANDED** | Redaction sat on `after_tool_call`, which fires only when a tool *returns a value*. Four paths went around it | `before_record` in `hooks.py`, consulted by `harness._record` | **built** |
@@ -259,6 +259,41 @@ was never closed, so its connection pool was collected at interpreter shutdown �
 after the event loop was gone. Both adapters now have `aclose()`, closing only a
 client they created, and `_repl` calls it on every exit path. Measured after:
 `0 occurrences` of `athrow` in a full session.
+
+### Structured logging — landed, and it found a fifth redaction bypass
+
+`eventlog.py` writes `~/.omega/logs/<session>.jsonl`, on by default, swept after
+seven days like the truncation spill files. **The harness gained nothing**:
+`add_listener` has existed since Tier 2 carrying exactly one subscriber, and
+"a second listener, not a new mechanism" was a claim until this proved it.
+
+**Then it found the bug it was built on top of.** Listeners were notified
+*before* `_record` ran, so every subscriber saw the original message while the
+transcript was being masked behind it:
+
+```
+transcript holds the key : False
+A LISTENER SAW THE KEY   : True
+```
+
+A log written from that would have put the key back on disk by a route
+`before_record` never covered — the fifth way around, in a category `TIER-2.md`
+predicted would keep reopening. Fixed by recording **before** notifying, and by
+masking the event itself: an event carries its own *copy* of the message, so
+reordering alone left it pointing at the original.
+
+**One thing cannot be masked, and the design accounts for it rather than hiding
+it.** Every message event carries the raw provider `stream_event` beside the
+assembled message, and that holds a *delta*. A credential split across two
+streamed chunks matches no pattern in either half — no redaction pass can help.
+So the rule is mechanical: **the log records assembled messages, never
+fragments.** Five of the ten event types are written; `message_update` is not,
+and `stream_event` never is.
+
+A second bug came from running it rather than reading it: `session_id` does not
+exist until the first turn creates it, so a path bound at construction named
+every session `unsaved.jsonl` and appended them all to one file. The path is now
+resolved per write.
 
 ### The ordering constraint
 

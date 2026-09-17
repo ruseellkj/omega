@@ -23,6 +23,7 @@ from omega_agent.hooks import AgentHooks
 from omega_agent.session import JsonlSessionStore
 from omega_agent.types import AgentMessage, AssistantMessage, TextContent, UserMessage
 from omega_ai.fake import FakeProvider, text_turn
+from omega_coding.builtin_tools import build_tools
 from omega_coding.redact import redact_message, redacting_hook
 
 #: Shaped like a real Anthropic key and matched by the same pattern. Not one.
@@ -134,7 +135,10 @@ async def test_every_message_is_offered_exactly_once() -> None:
         pass
 
     assert seen[: len(after_first)] == after_first, "nothing was re-offered"
-    assert len(seen) == len(harness.messages)
+    # `>=`, not `==`: `_record` offers each transcript message once, and
+    # `_clean_event` offers the copy each event carries as well. Both are needed,
+    # so the hook legitimately sees more than the transcript holds.
+    assert len(seen) >= len(harness.messages)
 
 
 async def test_the_hook_may_rewrite_a_message_entirely() -> None:
@@ -176,3 +180,78 @@ async def test_redact_message_does_not_mutate_its_argument() -> None:
 
     assert original == before, "the argument is untouched"
     assert KEY not in cleaned.content  # type: ignore[union-attr]
+
+
+# ------------------------------------------------- the fifth path, found later
+
+
+async def test_a_listener_never_sees_an_unmasked_message() -> None:
+    """**The fifth bypass, and the reason this category keeps reopening.**
+
+    `TIER-2.md` warned that "a third way around will appear the next time a new
+    path to the transcript is added". Adding `before_record` closed three. Then
+    Tier 3's structured logging needed a *listener*, and listeners were notified
+    **before** `_record` ran — so the transcript was clean while every subscriber
+    saw the original. A log written from that would have put the key back on disk
+    by a different route.
+
+    Fixed by recording first and cleaning the event before anyone is notified.
+    The event carries its own copy of the message, so ordering alone was not
+    enough; the copy has to be masked too.
+    """
+    seen: list[object] = []
+    harness = _harness(FakeProvider([text_turn(f"the key is {KEY}")]))
+    harness.add_listener(seen.append)
+
+    async for _ in harness.run(f"my key is {KEY}"):
+        pass
+
+    assert KEY not in _text(harness.messages), "the transcript, as before"
+
+    # The assembled message on every event is masked. `stream_event` is not, and
+    # cannot be: it carries a *delta*, and a key split across two chunks matches
+    # no pattern in either half. Nothing that reaches disk carries it - see
+    # `test_the_event_log_never_writes_a_delta`.
+    assert all(KEY not in repr(getattr(e, "message", "")) for e in seen)
+
+
+async def test_the_assembled_message_is_masked_on_every_yielded_event() -> None:
+    """A caller iterating `run()` is just another subscriber.
+
+    The assembled `message` is masked on all of them. The raw `stream_event`
+    beside it is not, for the reason above — which is why the renderer prints
+    deltas to a terminal and the log writes messages to disk, and never the
+    other way round.
+    """
+    harness = _harness(FakeProvider([text_turn(f"the key is {KEY}")]))
+
+    events = [event async for event in harness.run("go")]
+
+    assert any(getattr(e, "message", None) is not None for e in events), "some carry one"
+    assert all(KEY not in repr(getattr(e, "message", "")) for e in events)
+
+
+async def test_a_tool_result_reaches_listeners_masked(tmp_path: Path) -> None:
+    """`ToolExecutionEndEvent` carries the result as its own field, so it needs
+    the same treatment as the message events."""
+    from omega_ai.fake import tool_turn
+
+    secret_file = tmp_path / ".env"
+    secret_file.write_text(f"ANTHROPIC_API_KEY={KEY}\n")
+
+    seen: list[str] = []
+    harness = Harness(
+        provider=FakeProvider(
+            [[tool_turn("read_file", {"path": str(secret_file)}), text_turn("done")][0]]
+        ),
+        model="m",
+        system="s",
+        tools=build_tools(tmp_path),
+        hooks=AgentHooks(after_tool_call=redacting_hook, before_record=redact_message),
+    )
+    harness.add_listener(lambda event: seen.append(repr(event)))
+
+    async for _ in harness.run("read the env file"):
+        pass
+
+    assert KEY not in "\n".join(seen)

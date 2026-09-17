@@ -23,7 +23,13 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import replace
 
-from omega_agent.agent_events import AgentEvent
+from omega_agent.agent_events import (
+    AgentEvent,
+    MessageEndEvent,
+    MessageStartEvent,
+    MessageUpdateEvent,
+    ToolExecutionEndEvent,
+)
 from omega_agent.cancellation import CancelSignal
 from omega_agent.hooks import AgentHooks
 from omega_agent.loop import DEFAULT_MAX_TURNS, run_agent_loop
@@ -278,6 +284,27 @@ class Harness:
         self._recorded = len(self.messages)
         return len(self.messages)
 
+    async def _clean_event(self, event: AgentEvent) -> AgentEvent:
+        """Mask the message an event carries, if it carries one.
+
+        Reordering `_record` alone was not enough. An event holds its **own
+        copy** of the message, so replacing the entry in `messages` leaves the
+        event pointing at the original. Five of the ten event types carry one.
+
+        Returns a copy, like every other hook here: the loop may still be holding
+        the event it built, and editing that underneath it would be the same
+        mistake in a new place.
+        """
+        hook = self.hooks.before_record
+        if hook is None:
+            return event
+
+        if isinstance(event, MessageStartEvent | MessageUpdateEvent | MessageEndEvent):
+            return event.model_copy(update={"message": await hook(event.message)})
+        if isinstance(event, ToolExecutionEndEvent):
+            return event.model_copy(update={"result": await hook(event.result)})
+        return event
+
     async def _record(self) -> None:
         """Offer every new message to `before_record`, then persist.
 
@@ -351,9 +378,14 @@ class Harness:
             max_turns=self.max_turns,
             signal=self.signal,
         ):
-            for listener in self._listeners:
-                listener(event)
+            # **Record first, then notify.** The other order was a real leak:
+            # listeners saw the original message while the transcript was being
+            # masked behind them, so a logging subscriber would have written the
+            # secret to disk by a route `before_record` never covered.
             await self._record()
-            yield event
+            cleaned = await self._clean_event(event)
+            for listener in self._listeners:
+                listener(cleaned)
+            yield cleaned
 
         await self._record()

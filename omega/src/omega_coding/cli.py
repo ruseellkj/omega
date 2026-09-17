@@ -39,6 +39,7 @@ from omega_coding.compact import Compactor
 from omega_coding.context import measure
 from omega_coding.cost import CostTracker, price_from_env
 from omega_coding.env import USER_CONFIG, find_env_files, load_environment
+from omega_coding.eventlog import EventLog, sweep_old_logs
 from omega_coding.history import drop_empty_failed_turns
 from omega_coding.redact import redact_message, redacting_hook
 from omega_coding.status import StatusLine
@@ -254,6 +255,11 @@ def main() -> None:
         help="List saved sessions for this project and exit.",
     )
     parser.add_argument(
+        "--no-log",
+        action="store_true",
+        help="Do not write a structured event log for this session.",
+    )
+    parser.add_argument(
         "--no-save",
         action="store_true",
         help="Do not write this session to disk.",
@@ -396,6 +402,18 @@ def main() -> None:
     )
 
     harness.add_listener(tracker.observe)
+
+    # The second listener, and the evidence that `add_listener` was a seam rather
+    # than a claim. Written by default: a debug log you have to remember to turn
+    # on is one you do not have when it matters.
+    if not args.no_log:
+        logs = Path.home() / ".omega" / "logs"
+        sweep_old_logs(logs)
+        # Resolved lazily: `session_id` is None until the first turn creates it,
+        # so binding the name here put every session in one shared file.
+        harness.add_listener(
+            EventLog(lambda: logs / f"{harness.session_id or 'unsaved'}.jsonl")
+        )
 
     if args.sessions:
         if store is None:
