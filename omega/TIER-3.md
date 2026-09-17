@@ -135,7 +135,7 @@ scorecard stays at **8 of 9** until then.
 |---|---|---|---|
 | ~~**A real TUI**~~ **LANDED** | Print output could not accept a keystroke mid-turn, so steering was unreachable | `omega_coding/tui/` — Textual, behind `--tui` | **filled** |
 | ~~**Search tools**~~ **LANDED** | The model read whole files to find one line, and shelled out for the rest | `list_files`, `find_files`, `search_files` in `builtin_tools.py` | **filled** |
-| **Session branching** | You can rewind by reading the JSONL, but not fork and navigate | `parent_id` is already written on every entry (`session/entries.py`). Tier 3 adds `tree.py` — `path_to_entry`, cycle detection | **exists** |
+| ~~**Session branching**~~ **LANDED** | `load()` read the file linearly, so a fork would have returned both attempts at once | `session/tree.py` — `path_to`, `leaves`, cycle detection; `/rewind` | **filled** |
 | ~~**Structured logging**~~ **LANDED** | Debugging meant reading print output — which a TUI removes | `eventlog.py`, a second listener on the same event stream | **filled** |
 | **Image reading** | Screenshots cannot be handed to the model | `types.py` content blocks are a discriminated union; an image block is an addition, not a change | **exists** |
 | **Subagents *or* plan mode** | No task decomposition | `before_tool_call` plus the headless driver. A subagent **is** the headless driver, called from a tool | **exists** |
@@ -349,6 +349,55 @@ untouched.
 * themes, autocomplete, file drop, notifications, a session picker, mouse
   support, markdown rendering, and a diff view for `edit_file` — that last one
   being the most obviously missing.
+
+### Session branching — landed, and Tier 2's bet paid
+
+`entries.py` has written `parent_id` on every entry since Tier 2, read by
+nothing, on one recorded argument (`anatomy.md:314`): *"Retrofitting a tree onto
+a list is a rewrite."* That bet is now collected, and the receipt is specific:
+
+**No record shape changed. No `SCHEMA_VERSION` bump. No file already on disk
+became unreadable.** The format was right from the start; only the reader was
+wrong.
+
+**And the reader really was wrong.** `store.load()` returned every entry in file
+order, ignoring `parent_id` completely. That is indistinguishable from correct
+while a session is a straight line — which is why it survived a whole tier. Give
+one parent two children and it silently returns both attempts concatenated: a
+conversation that never happened, containing two different answers to the same
+question. So this was not a feature added to working code; it was a latent bug
+that nothing could observe until something branched.
+
+The compatibility claim was written so it could fail — *for a linear session the
+path to the only leaf is the whole file* — and it holds: `load()` returns exactly
+what it always did for every session written before today.
+
+```
+session/tree.py     path_to(entries, id) -> root..id      pure, no file handles
+                    leaves(entries)      -> branch tips   file order preserved
+                    CycleInTranscript                     raised, never looped
+```
+
+**Why a cycle is raised rather than skipped.** Nothing omega writes can make one;
+a hand-edited or corrupted file can. A `while parent is not None` walk over a
+cycle **never returns** — the process hangs with no error and nothing to grep
+for, which is a worse failure than either crashing or returning junk.
+
+**The write half is `/rewind`**, counted in *questions* rather than messages,
+because one question can produce a dozen messages and nobody knows how many.
+Nothing is deleted: the abandoned turns stay exactly where they are and the next
+one hangs off an older parent, so both attempts remain loadable. That is what
+append-only bought, and why rewinding a log you cannot edit is possible at all.
+
+```
+Rewound 1 question(s): 4 messages dropped.
+The old branch is still in the session file - /sessions still lists it.
+```
+
+**Not built:** a branch *picker*. `load(branch=...)` takes a leaf id and
+`leaves()` lists them, so the mechanism is complete, but choosing between two
+attempts by pasting a hex id is not a feature. That wants the TUI, and is the
+obvious next thing to hang off it.
 
 ### The ordering constraint
 

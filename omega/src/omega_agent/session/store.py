@@ -45,6 +45,7 @@ from typing import Protocol
 
 from omega_agent.session.entries import SessionEntry, SessionHeader
 from omega_agent.session.jsonl import append_record, read_records
+from omega_agent.session.tree import CycleInTranscript, leaves, path_to
 from omega_agent.types import AgentMessage
 
 
@@ -59,7 +60,12 @@ class SessionInfo:
 
 
 class SessionStore(Protocol):
-    """The storage seam. Five methods, all the harness and CLI need."""
+    """The storage seam. Seven methods, all the harness and CLI need.
+
+    Two arrived with Tier 3 branching — `entries` and `branch_from`. Both are on
+    the Protocol rather than the concrete class because the harness calls them,
+    and a seam a caller has to downcast through is not a seam.
+    """
 
     def create_session(self, *, model: str) -> str:
         """Start a session and return its id."""
@@ -69,8 +75,16 @@ class SessionStore(Protocol):
         """Add one message to the end of a session."""
         ...
 
-    def load(self, session_id: str) -> list[AgentMessage]:
-        """Every message in a session, in order. Empty if it does not exist."""
+    def entries(self, session_id: str) -> list[SessionEntry]:
+        """Every entry with its id and parent, in write order."""
+        ...
+
+    def branch_from(self, session_id: str, entry_id: str | None) -> None:
+        """Hang the next appended entry off `entry_id` rather than the tail."""
+        ...
+
+    def load(self, session_id: str, *, branch: str | None = None) -> list[AgentMessage]:
+        """One branch of a session, root first. Empty if it does not exist."""
         ...
 
     def latest_session_id(self) -> str | None:
@@ -160,12 +174,47 @@ class JsonlSessionStore:
         append_record(self.path_for(session_id), entry)
         self._last_entry[session_id] = entry.id
 
-    def load(self, session_id: str) -> list[AgentMessage]:
+    def entries(self, session_id: str) -> list[SessionEntry]:
+        """Every entry in the file, in the order it was written.
+
+        The raw material for `tree.py`. Separate from `load` because a caller
+        picking a branch needs ids and parents, and a caller resuming one needs
+        only messages — handing out entries for both would push the tree shape
+        into places that have no business knowing it.
+        """
         return [
-            record.message
+            record
             for record in read_records(self.path_for(session_id))
             if isinstance(record, SessionEntry)
         ]
+
+    def load(self, session_id: str, *, branch: str | None = None) -> list[AgentMessage]:
+        """The messages of one branch, root first.
+
+        **This used to return the file in order, and that was a latent bug.**
+        While every session was a straight line the two agree exactly, which is
+        why it survived a tier. Once one parent has two children, file order
+        returns both attempts concatenated — a conversation that never happened.
+
+        `branch` names the leaf to load. Omitted, it takes the **last** leaf,
+        which for a linear file is the only one and for a branched file is the
+        most recently written — "carry on where I left off".
+        """
+        entries = self.entries(session_id)
+        if not entries:
+            return []
+
+        tip = branch
+        if tip is None:
+            ends = leaves(entries)
+            if not ends:
+                # Only reachable if every entry is claimed as a parent, which
+                # means a cycle. `path_to` reports it properly; guessing a tip
+                # here would hide it.
+                raise CycleInTranscript(f"session {session_id!r} has no leaf entry")
+            tip = ends[-1].id
+
+        return [entry.message for entry in path_to(entries, tip)]
 
     def latest_session_id(self) -> str | None:
         if not self.directory.exists():
@@ -213,6 +262,20 @@ class JsonlSessionStore:
             )
 
         return sorted(rows, key=lambda row: row.modified, reverse=True)
+
+    def branch_from(self, session_id: str, entry_id: str | None) -> None:
+        """Hang the next appended entry off `entry_id` instead of the tail.
+
+        The **whole write side of branching**, and it is one line of state —
+        which is what `parent_id` shipping in Tier 2 bought. Nothing is deleted
+        and nothing is rewritten: the abandoned entries stay exactly where they
+        are, and the file stays append-only, which is the property that makes a
+        crash mid-turn survivable.
+
+        `None` branches from the root, i.e. starts the conversation over while
+        keeping the old one readable.
+        """
+        self._last_entry[session_id] = entry_id
 
     def _parent_for(self, session_id: str) -> str | None:
         if session_id in self._last_entry:

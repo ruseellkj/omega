@@ -260,6 +260,46 @@ class Harness:
         self.session_id = None
         return previous
 
+    def rewind(self, questions: int = 1) -> int:
+        """Drop back to before the last `questions` user messages. Returns the
+        number of messages removed.
+
+        **The user-facing half of branching.** Reading a tree is useless without
+        a way to make one, and this is the way: "that went wrong, go back and ask
+        differently".
+
+        Counted in *questions*, not messages, because that is the unit a person
+        thinks in. One question can produce a dozen messages — an assistant turn,
+        four tool calls, four results, a final answer — and "go back 12 messages"
+        is not something anyone knows the answer to.
+
+        **Nothing is deleted.** The abandoned messages stay in the session file
+        exactly where they are; the next append simply hangs off an older parent,
+        so the old branch remains loadable with `load(branch=...)`. That is the
+        whole reason the file is append-only, and the reason `parent_id` was
+        written on every entry a tier before anything read it.
+        """
+        starts = [i for i, m in enumerate(self.messages) if isinstance(m, UserMessage)]
+        if not starts:
+            return 0
+
+        cut = starts[-questions] if questions <= len(starts) else starts[0]
+        removed = len(self.messages) - cut
+
+        # The store assigns entry ids in message order, so the entry that should
+        # become the new parent is the one before the cut. Resolved through the
+        # store rather than guessed, because a resumed session has entries this
+        # harness never wrote.
+        if self.store is not None and self.session_id is not None:
+            written = self.store.entries(self.session_id)
+            parent = written[cut - 1].id if 0 < cut <= len(written) else None
+            self.store.branch_from(self.session_id, parent)
+
+        del self.messages[cut:]
+        self._persisted = len(self.messages)
+        self._recorded = len(self.messages)
+        return removed
+
     def replace_transcript(self, messages: Sequence[AgentMessage]) -> int:
         """Swap the working transcript for a smaller one. Returns how many remain.
 

@@ -31,7 +31,7 @@ Tau's equivalent of `/clear` is `/new`; Pi's is also `/new`, though its handler
 is still called `handleClearCommand`.
 
 **An unknown `/foo` is an error.** Both references forward it to the model as an
-ordinary prompt. With eight commands and a metered API on the other side, a typo
+ordinary prompt. With nine commands and a metered API on the other side, a typo
 deserves a correction rather than an invoice.
 
 **`!cmd` does not touch the conversation — and both references disagree.** In
@@ -279,6 +279,39 @@ async def _compact(context: CommandContext) -> Outcome:
     return "handled"
 
 
+async def _rewind(context: CommandContext) -> Outcome:
+    """Go back before the last question and try a different one.
+
+    **Nothing is deleted.** The abandoned turns stay in the session file; the
+    next one simply hangs off an older parent, so the old attempt is still
+    loadable. That is what `parent_id` on every entry has been for since Tier 2,
+    and why an append-only file can still be rewound.
+
+    Counted in questions rather than messages, because one question can produce a
+    dozen messages and nobody knows how many.
+    """
+    target = context.args.strip()
+    questions = 1
+    if target:
+        try:
+            questions = int(target)
+        except ValueError:
+            print(f"\n  Usage: /rewind [questions]. '{target}' is not a number.\n")
+            return "handled"
+        if questions < 1:
+            print("\n  Usage: /rewind [questions], at least 1.\n")
+            return "handled"
+
+    removed = context.harness.rewind(questions)
+    if not removed:
+        print("\n  Nothing to rewind - the conversation is empty.\n")
+        return "handled"
+
+    print(f"\n  Rewound {questions} question(s): {removed} messages dropped.")
+    print("  The old branch is still in the session file - /sessions still lists it.\n")
+    return "handled"
+
+
 async def _exit(context: CommandContext) -> Outcome:
     return "exit"
 
@@ -291,6 +324,7 @@ COMMANDS: tuple[Command, ...] = (
     Command("cost", "/cost", "tokens and spend so far", _cost),
     Command("context", "/context", "how full the context window is", _context),
     Command("compact", "/compact [pct]", "shrink the conversation now", _compact),
+    Command("rewind", "/rewind [n]", "go back before your last question", _rewind),
     Command("exit", "/exit", "leave omega", _exit),
 )
 
@@ -368,7 +402,7 @@ async def dispatch(text: str, context: CommandContext) -> Outcome | None:
 def _unknown(name: str) -> None:
     """Say so, and guess what was meant.
 
-    Both references forward an unknown `/foo` to the model. With eight commands and
+    Both references forward an unknown `/foo` to the model. With nine commands and
     a metered API on the other side, a typo is worth a correction rather than a
     charge.
     """
