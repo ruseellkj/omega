@@ -66,6 +66,27 @@ class ThinkingContent(WireModel):
     signature: str | None = None
 
 
+class ImageContent(WireModel):
+    """An image, carried as base64 with its real media type.
+
+    **Tier 3, and the test of a Tier 1 decision.** `ContentBlock` was made a
+    discriminated union rather than a bare string so that this would be an
+    addition instead of a change to every caller. It was.
+
+    `media_type` is detected from the file's **magic bytes**, never from its
+    extension (`builtin_tools.read_image`). An extension is a claim and a `.png`
+    holding a JPEG is an ordinary mistake; a provider rejecting the request is
+    not a good way to find out.
+
+    Base64 rather than a path, because the bytes have to reach the provider and
+    a path is meaningless on the other side of an HTTP request.
+    """
+
+    type: Literal["image"] = "image"
+    media_type: str
+    data: str
+
+
 class ToolCall(WireModel):
     """The model asking for a tool to be run. It cannot run anything itself."""
 
@@ -79,6 +100,10 @@ ContentBlock = Annotated[
     TextContent | ThinkingContent | ToolCall,
     Field(discriminator="type"),
 ]
+
+#: What a tool may hand back. Narrower than `ContentBlock` on purpose: a tool
+#: cannot produce thinking, and it certainly cannot produce a tool call.
+ResultBlock = Annotated[TextContent | ImageContent, Field(discriminator="type")]
 
 
 # ---------------------------------------------------------------------- usage
@@ -157,7 +182,7 @@ class ToolResultMessage(WireModel):
     role: Literal["toolResult"] = "toolResult"
     tool_call_id: str
     tool_name: str
-    content: list[TextContent] = Field(default_factory=list)
+    content: list[ResultBlock] = Field(default_factory=list)
     is_error: bool = False
 
     @model_validator(mode="before")
@@ -174,7 +199,21 @@ class ToolResultMessage(WireModel):
 
     @property
     def text(self) -> str:
-        return "\n".join(block.text for block in self.content)
+        """The prose only. **Images contribute nothing.**
+
+        `.text` is read by the cost meter, the event log, redaction and both
+        adapters. Letting a megabyte of base64 through here would put it in the
+        log, through the redaction patterns, and into the token estimate — three
+        places that all want words.
+        """
+        return "\n".join(
+            block.text for block in self.content if isinstance(block, TextContent)
+        )
+
+    @property
+    def images(self) -> list[ImageContent]:
+        """The image blocks, for the adapters that have to place them."""
+        return [block for block in self.content if isinstance(block, ImageContent)]
 
 
 AgentMessage = Annotated[

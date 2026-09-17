@@ -2,7 +2,35 @@
 
 What this tier will contain, and what it deliberately leaves to Tier 3+.
 
-**Status: open. Written before the code, to be kept honest afterwards.**
+**Status: every row filled. Written before the code, kept honest afterwards.**
+
+**Closed at 8,699 lines of source across 46 files · 8,750 lines of tests · 512
+tests, all offline · `loop.py` at 190.**
+
+| | Tier 1 | Tier 2 | Tier 3 | |
+|---|---|---|---|---|
+| Source | 1,577 | 4,654 | **8,699** | +4,045 |
+| Tests | 45 | 289 | **512** | +223 |
+| `loop.py` | 151 | 190 | **190** | **+0** |
+
+**The estimate was right this time, which is new.** This file predicted
+9,000–12,000 after applying the 1.3–2x correction factor to a naive "~4,000".
+The answer is 8,699 — just under the range, and the first estimate in this
+project not to run low. The factor was the useful part, not the original guess.
+
+**`loop.py` did not move.** Eight tiers of feature work — compaction, caching,
+redaction, search, logging, a TUI, branching, subagents, images — and the loop is
+the same 190 lines it was when Tier 2 closed. Every one of them filled a seam
+that already existed, except `before_record`, which added one and is the reason
+that row went first.
+
+**One row is not proven, and it is not a formality.** Prompt caching is
+demonstrated on OpenAI with a measured 32% of input served from cache, and
+unproven on Anthropic because the key on this machine returns `credit balance is
+too low`. Markers are sent and tested; a cache hit is not observed. The beginner
+scorecard therefore reads **8 of 9**, not 9 of 9 — see the caching section.
+
+
 
 Like `TIER-1.md` and `TIER-2.md`, this file is a *contract* written at the start of the tier — what
 would have to be true when it closes — so the work can be checked against a commitment rather than
@@ -137,7 +165,7 @@ scorecard stays at **8 of 9** until then.
 | ~~**Search tools**~~ **LANDED** | The model read whole files to find one line, and shelled out for the rest | `list_files`, `find_files`, `search_files` in `builtin_tools.py` | **filled** |
 | ~~**Session branching**~~ **LANDED** | `load()` read the file linearly, so a fork would have returned both attempts at once | `session/tree.py` — `path_to`, `leaves`, cycle detection; `/rewind` | **filled** |
 | ~~**Structured logging**~~ **LANDED** | Debugging meant reading print output — which a TUI removes | `eventlog.py`, a second listener on the same event stream | **filled** |
-| **Image reading** | Screenshots cannot be handed to the model | `types.py` content blocks are a discriminated union; an image block is an addition, not a change | **exists** |
+| ~~**Image reading**~~ **LANDED** | Screenshots could not be handed to the model at all | `ImageContent` in `types.py`; `read_image`; both adapters place it | **filled** |
 | ~~**Subagents**~~ **LANDED** | No task decomposition, and exploration filled the parent's context | `subagent.py` — `run_headless` called from a `Tool`. Nothing below it changed | **filled** |
 | ~~**Redaction at the transcript boundary**~~ **LANDED** | Redaction sat on `after_tool_call`, which fires only when a tool *returns a value*. Four paths went around it | `before_record` in `hooks.py`, consulted by `harness._record` | **built** |
 
@@ -444,6 +472,60 @@ these the exception would be a scheduling change dressed as a feature), no
 session file for the child, and **no nested cost line** — the child's tokens are
 real and are not separately reported, which is worth knowing before trusting
 `/cost` while using it.
+
+### Image reading — landed, and it was the union's exam
+
+Tier 1 made `ContentBlock` a discriminated union rather than a string, and
+`TIER-2.md` used that to claim an image would be "an addition, not a change to
+every caller". Mostly true — `ImageContent` slotted in, no `SCHEMA_VERSION`
+bump, and every text-only session on disk still sends byte-identically. But
+"addition" understates one part.
+
+**The two providers disagree about where an image may appear**, and the layer had
+to absorb it:
+
+| | an image in a tool result |
+|---|---|
+| Anthropic | allowed, inside the `tool_result` block |
+| OpenAI Chat Completions | **rejected** — a `tool` message takes text only |
+
+So the Anthropic adapter nests it and the OpenAI adapter emits the tool result as
+a text note *plus a following `user` message* carrying the image, that being the
+one place Chat Completions accepts one. Measured:
+
+```
+anthropic -> tool_result carries: ['text', 'image']
+openai    -> roles: ['user', 'tool', 'user']
+             image rides on: image_url
+```
+
+The neutral `ToolResultMessage` never picked a side — the same argument the
+provider layer was built on, restated on a content type that did not exist when
+the argument was made.
+
+**Detection is by magic bytes, never by extension.** Tau reaches the same
+conclusion (`image_processing.py:39`). An extension is a claim; a `.png` holding
+a JPEG is an ordinary mistake, and a 400 from the provider is a slow way to find
+out. The `RIFF` case is the one worth having a test for — AVI and WAV share that
+signature, so only `WEBP` at offset 8 counts, and guessing wrong sends audio to a
+vision model:
+
+```
+png                           image/png
+wav (RIFF but not an image)   None
+text                          None
+```
+
+**mypy found a crash before an image ever reached it.** `redact_message` read
+`.text` off every block of a tool result; widening the union made that a type
+error. It would have thrown on the first screenshot. Images now pass through
+redaction untouched — and not out of laziness: a credential inside a screenshot
+is pixels, and a base64 payload matches no pattern, so redaction has nothing to
+offer and pretending otherwise would be worse.
+
+`.text` on both `ToolResult` and `ToolResultMessage` now skips images, because
+that property is read by the cost estimate, the event log and the redaction pass
+— three places that want words, not a megabyte of base64.
 
 ### The ordering constraint
 

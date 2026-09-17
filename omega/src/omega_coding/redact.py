@@ -141,35 +141,48 @@ async def redact_message(message: AgentMessage) -> AgentMessage:
         return message.model_copy(update={"content": cleaned}) if found else message
 
     if isinstance(message, ToolResultMessage):
-        blocks = [TextContent(text=redact(b.text)[0]) for b in message.content]
-        changed = any(
-            new.text != old.text
-            for new, old in zip(blocks, message.content, strict=True)
-        )
-        return message.model_copy(update={"content": blocks}) if changed else message
-
-    if isinstance(message, AssistantMessage):
-        rebuilt: list[Any] = []
+        # Not every block is prose. **mypy caught this before an image ever
+        # reached it** — the previous version read `.text` off every block and
+        # would have crashed on the first screenshot.
+        #
+        # An image passes through untouched, and not out of laziness: a
+        # credential *inside* a screenshot is pixels, and a base64 payload
+        # matches no pattern in the list. Redaction has nothing to offer here,
+        # and pretending otherwise would be the worse answer.
+        blocks: list[Any] = []
         changed = False
         for block in message.content:
             if isinstance(block, TextContent):
                 cleaned, found = redact(block.text)
                 if found:
+                    blocks.append(TextContent(text=cleaned))
+                    changed = True
+                    continue
+            blocks.append(block)
+        return message.model_copy(update={"content": blocks}) if changed else message
+
+    if isinstance(message, AssistantMessage):
+        rebuilt: list[Any] = []
+        changed = False
+        for part in message.content:
+            if isinstance(part, TextContent):
+                cleaned, found = redact(part.text)
+                if found:
                     rebuilt.append(TextContent(text=cleaned))
                     changed = True
                     continue
-            elif isinstance(block, ToolCall):
+            elif isinstance(part, ToolCall):
                 # Arguments are how a key travels *into* a tool - `run_shell`
                 # with the secret inline is the ordinary case, and it is recorded
                 # long before any result comes back.
-                cleaned_args, found = redact(json.dumps(block.arguments))
+                cleaned_args, found = redact(json.dumps(part.arguments))
                 if found:
-                    rebuilt.append(block.model_copy(update={"arguments": json.loads(cleaned_args)}))
+                    rebuilt.append(part.model_copy(update={"arguments": json.loads(cleaned_args)}))
                     changed = True
                     continue
-            elif isinstance(block, ThinkingContent):
+            elif isinstance(part, ThinkingContent):
                 pass  # signature must return verbatim; see the docstring
-            rebuilt.append(block)
+            rebuilt.append(part)
         return message.model_copy(update={"content": rebuilt}) if changed else message
 
     return message

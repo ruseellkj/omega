@@ -73,6 +73,12 @@ neither imports it.
 | 24b | `commands.py` | 280 | **The command channel.** `/help`, `/clear`, `!cmd` — what tells the *program* something instead of asking the model. Note `dispatch` returns three things, and that `!cmd` reuses `execute_tool_call` rather than the shell. |
 | 25 | `history.py` | 42 | **Two views of history**: what is kept versus what is sent. The small sibling of the seam compaction will use at Tier 3. |
 | 26 | `context.py` | 116 | How full the context window is. Measures the problem `compact.py` fixes. |
+| 26b | `eventlog.py` | 144 | **Tier 3.** The second listener. Writes assembled messages, never deltas. |
+| 26c | `subagent.py` | 180 | **Tier 3.** A nested agent, as a tool calling `run_headless`. |
+| 26d | `tui/state.py` | 97 | **Tier 3.** What the screen shows. Imports no Textual. |
+| 26e | `tui/adapter.py` | 98 | **Tier 3.** The 10 agent events -> screen state. |
+| 26f | `tui/app.py` | 203 | **Tier 3.** The screen. Steering becomes typeable here. |
+| 26g | `session/tree.py` | 101 | **Tier 3.** The transcript is a tree. `path_to`, `leaves`, cycle detection. |
 | 26a | `compact.py` | 351 | **Tier 3.** Fills `transform_context`. Cuts on turn boundaries so a tool call is never orphaned. |
 | 27 | `cost.py` | 96 | What the run cost. Read why it ships **no price table**. |
 | 28 | `headless.py` | 113 | Run the agent with no keyboard. Also the benchmark interface, and at Tier 3+ a subagent is this function called from a tool. |

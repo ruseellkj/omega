@@ -49,12 +49,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import difflib
+from base64 import b64encode
 from collections.abc import Callable, Iterator
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from omega_agent.tools import Tool, ToolError, ToolResult
-from omega_agent.types import CancellationToken
+from omega_agent.types import CancellationToken, ImageContent, TextContent
 from omega_coding.file_lock import FILE_LOCKS, FileLocks
 from omega_coding.paths import is_inside, resolve_path, resolve_within_root
 from omega_coding.truncate import MAX_BYTES, MAX_LINES, truncate_output
@@ -172,6 +173,41 @@ def _readable_lines(path: Path) -> list[str] | None:
         return path.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError):
         return None
+
+
+#: Magic bytes to media type. **Detected from content, never from the file
+#: extension.** An extension is a claim; a `.png` holding a JPEG is an ordinary
+#: mistake, and a provider rejecting the request is a slow way to discover it.
+#: Tau reaches the same conclusion (`image_processing.py:39`).
+#:
+#: Ordered longest-prefix-first so a more specific signature is not shadowed by
+#: a shorter one it starts with.
+IMAGE_SIGNATURES: tuple[tuple[bytes, str], ...] = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"RIFF", "image/webp"),  # checked further below: RIFF alone is not WebP
+)
+
+#: Providers reject an image beyond a few megabytes, and base64 inflates by a
+#: third. Refusing locally with a clear reason beats a 400 from the API.
+MAX_IMAGE_BYTES = 4 * 1024 * 1024
+
+
+def detect_image_type(data: bytes) -> str | None:
+    """The media type of `data`, or None if it is not a recognised image."""
+    for signature, media_type in IMAGE_SIGNATURES:
+        if not data.startswith(signature):
+            continue
+        if signature == b"RIFF":
+            # RIFF is a container - AVI and WAV share it. Only WEBP at offset 8
+            # is an image, and guessing wrong here sends audio to a vision model.
+            if data[8:12] != b"WEBP":
+                continue
+            return "image/webp"
+        return media_type
+    return None
 
 
 def _as_tool_error(path: Path, exc: OSError | UnicodeDecodeError) -> ToolError:
@@ -413,6 +449,42 @@ def build_tools(
             details={"exit_code": process.returncode, "truncated": truncation.truncated},
         )
 
+    async def read_image(
+        arguments: dict[str, Any], signal: CancellationToken | None
+    ) -> ToolResult:
+        path = resolve(arguments["path"], base)
+        try:
+            raw = await asyncio.to_thread(path.read_bytes)
+        except OSError as exc:
+            raise _as_tool_error(path, exc) from exc
+
+        media_type = detect_image_type(raw)
+        if media_type is None:
+            # A plain result, not an error: "that is not an image" is an answer,
+            # and the model can go and read it as text instead.
+            message = (
+                f"{_relative(path, base)} is not a recognised image "
+                "(png, jpeg, gif or webp). Read it with read_file if it is text."
+            )
+            return ToolResult(content=message)  # type: ignore[arg-type]
+
+        if len(raw) > MAX_IMAGE_BYTES:
+            # Refused here rather than by the provider, because a 400 from the
+            # API costs a round trip and says less.
+            message = (
+                f"{_relative(path, base)} is {len(raw) // 1024}KB, over the "
+                f"{MAX_IMAGE_BYTES // (1024 * 1024)}MB limit for an image."
+            )
+            return ToolResult(content=message)  # type: ignore[arg-type]
+
+        return ToolResult(
+            content=[
+                TextContent(text=f"{_relative(path, base)} ({media_type})"),
+                ImageContent(media_type=media_type, data=b64encode(raw).decode()),
+            ],
+            details={"media_type": media_type, "bytes": len(raw)},
+        )
+
     async def list_files(
         arguments: dict[str, Any], signal: CancellationToken | None
     ) -> ToolResult:
@@ -613,6 +685,22 @@ def build_tools(
                 "more context - do not guess",
             ),
             execute=edit_file,
+        ),
+        Tool(
+            name="read_image",
+            description=(
+                "Read an image file so the model can see it - a screenshot, a diagram, a "
+                "chart. The type is detected from the file's contents, not its name. "
+                "Use read_file for text; this one is only for images."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the image file."}
+                },
+                "required": ["path"],
+            },
+            execute=read_image,
         ),
         Tool(
             name="list_files",

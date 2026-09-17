@@ -247,11 +247,32 @@ def to_anthropic_messages(messages: list[AgentMessage]) -> list[dict[str, Any]]:
 
     for message in messages:
         if isinstance(message, ToolResultMessage):
+            # Anthropic accepts image blocks *inside* a tool_result, so that is
+            # where they go - closest to where the model asked for them. The
+            # OpenAI adapter cannot do this and has to place them elsewhere;
+            # neither rule escapes its own file, which is the point of the layer.
+            body: Any
+            if message.images:
+                body = [{"type": "text", "text": message.text}] if message.text else []
+                body += [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": image.media_type,
+                            "data": image.data,
+                        },
+                    }
+                    for image in message.images
+                ]
+            else:
+                body = message.text
+
             pending_results.append(
                 {
                     "type": "tool_result",
                     "tool_use_id": message.tool_call_id,
-                    "content": message.text,
+                    "content": body,
                     "is_error": message.is_error,
                 }
             )

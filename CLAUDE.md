@@ -10,7 +10,7 @@ shipping — he reads every line himself.
 
 | Directory | What it is |
 |---|---|
-| `omega/` | **the agent.** Three packages, 6,247 lines of `src/`, 395 tests. Tier 2 complete. |
+| `omega/` | **the agent.** Three packages, 8,699 lines of `src/`, 512 tests. Tier 3 complete. |
 | `dev-notes/` | the study notes — teardowns of the references, architecture decisions, concepts |
 | `research/pi/` | **reference 1**: Pi (TypeScript), `github.com/earendil-works/pi` |
 | `research/tau/` | **reference 2**: Tau (Python), `github.com/huggingface/tau` — a port of Pi |
@@ -25,7 +25,7 @@ references do this?" — never edit them.
 ```bash
 cd omega
 uv sync                             # install from the lockfile
-uv run pytest -q                    # 395 tests, ~3s, fully offline
+uv run pytest -q                    # 512 tests, ~6s, fully offline
 uv run mypy --strict src            # must be clean
 uv run ruff check .                 # must be clean
 uv run python -m omega_coding.evals # smoke eval, 4/4, no network
@@ -70,7 +70,7 @@ If a change would grow `loop.py`, it almost certainly belongs behind a hook inst
 
 ## Reading the code
 
-`omega/READING-ORDER.md` gives all 38 files in dependency order with one line each. Start there,
+`omega/READING-ORDER.md` gives all 46 files in dependency order with one line each. Start there,
 not with `ls`. `omega/TIER-1.md` and `omega/TIER-2.md` record what each tier has, what it lacks,
 and where Tier 3 puts it.
 

@@ -273,8 +273,8 @@ async def test_schemas_are_well_formed(tmp_path: Path) -> None:
             assert name in tool.parameters["properties"]
 
 
-async def test_there_are_seven_tools_now(tmp_path: Path) -> None:
-    """Four became seven when Tier 3 added search.
+async def test_there_are_eight_tools_now(tmp_path: Path) -> None:
+    """Four became eight across Tier 3: three search tools, then read_image.
 
     The count is asserted rather than the set alone, because a tool appearing
     without anyone noticing is how `_PATH_ARGUMENTS` in `approval.py` falls out
@@ -286,6 +286,7 @@ async def test_there_are_seven_tools_now(tmp_path: Path) -> None:
         "find_files",
         "list_files",
         "read_file",
+        "read_image",
         "run_shell",
         "search_files",
         "write_file",

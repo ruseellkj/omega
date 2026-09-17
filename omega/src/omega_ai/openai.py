@@ -131,6 +131,19 @@ def to_openai_tools(tools: list[Tool]) -> list[dict[str, Any]]:
     ]
 
 
+def _image_note(images: list[Any]) -> str:
+    """What a `tool` message says when its real payload is an image.
+
+    It cannot be empty — some endpoints reject a blank tool message — and it
+    cannot be the image, because this format does not allow one here. So it says
+    what is coming, and the next message carries it.
+    """
+    if not images:
+        return "(no output)"
+    kinds = ", ".join(image.media_type for image in images)
+    return f"({len(images)} image(s) follow: {kinds})"
+
+
 def to_openai_messages(system: str, messages: list[AgentMessage]) -> list[dict[str, Any]]:
     """Neutral transcript to OpenAI's message list.
 
@@ -179,9 +192,34 @@ def to_openai_messages(system: str, messages: list[AgentMessage]) -> list[dict[s
                     "tool_call_id": message.tool_call_id,
                     # Never empty: some endpoints reject a blank tool message,
                     # and "(no output)" is also more useful to the model.
-                    "content": message.text or "(no output)",
+                    "content": message.text or _image_note(message.images),
                 }
             )
+
+            # **The divergence, absorbed here.** A `tool` message in Chat
+            # Completions takes text only - an image in one is rejected outright,
+            # where Anthropic accepts it inside the tool_result. So the image
+            # follows as a `user` message, which is the single place this format
+            # allows one.
+            #
+            # The neutral `ToolResultMessage` above never had to pick a side.
+            # That is the provider layer's argument, restated on a content type
+            # that did not exist when the argument was made.
+            if message.images:
+                out.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{image.media_type};base64,{image.data}"
+                                },
+                            }
+                            for image in message.images
+                        ],
+                    }
+                )
 
     return out
 

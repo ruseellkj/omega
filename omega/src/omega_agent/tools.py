@@ -25,7 +25,7 @@ from typing import Any
 
 from pydantic import Field, model_validator
 
-from omega_agent.types import CancellationToken, TextContent, WireModel
+from omega_agent.types import CancellationToken, ResultBlock, TextContent, WireModel
 
 
 # this class uses pydantic
@@ -33,7 +33,7 @@ from omega_agent.types import CancellationToken, TextContent, WireModel
 class ToolResult(WireModel):
     """What a tool produces when it succeeds."""
 
-    content: list[TextContent] = Field(default_factory=list)
+    content: list[ResultBlock] = Field(default_factory=list)
     details: dict[str, Any] | None = None
 
     @model_validator(mode="before")
@@ -46,7 +46,15 @@ class ToolResult(WireModel):
 
     @property
     def text(self) -> str:
-        return "\n".join(block.text for block in self.content)
+        """The prose only — an image block contributes nothing.
+
+        Same rule as `ToolResultMessage.text`, for the same reason: this is what
+        the log, the cost estimate and the redaction pass all read, and none of
+        them wants a base64 payload.
+        """
+        return "\n".join(
+            block.text for block in self.content if isinstance(block, TextContent)
+        )
 
 
 #: A tool's implementation. Receives validated arguments and a cancellation

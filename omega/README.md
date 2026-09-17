@@ -6,13 +6,15 @@ Named after a physics letter, following [Pi](https://github.com/earendil-works/p
 [Tau](https://github.com/huggingface/tau) — the two MIT-licensed agents this is studied from.
 Written independently, not forked.
 
-**Currently at Tier 2 — "it is usable."** 6,247 lines of source, 395 tests, all offline.
+**Currently at Tier 3 — "it survives a long task, and has a face."** 8,699 lines of source,
+512 tests, all offline.
 
-* **[`READING-ORDER.md`](READING-ORDER.md) — start here.** All 38 files in the order to read them,
+* **[`READING-ORDER.md`](READING-ORDER.md) — start here.** All 46 files in the order to read them,
   one line each, plus the questions to hold while reading.
 * [`TIER-1.md`](TIER-1.md) — what the first tier does, and what it deliberately left out
 * [`TIER-2.md`](TIER-2.md) — what this tier adds, and where each remaining gap plugs in at Tier 3
-* [`TIER-3.md`](TIER-3.md) — the open contract: compaction, caching, and a Textual TUI
+* [`TIER-3.md`](TIER-3.md) — every row filled: compaction, caching, a Textual TUI, branching,
+  search tools, structured logging, subagents, images
 * [`TIER-3-PLUS.md`](TIER-3-PLUS.md) — packaging, OAuth, extensions: what a product needs and a
   study project does not
 
@@ -98,7 +100,7 @@ the argument for diverging is in `src/omega_coding/commands.py`.
 ## Check it
 
 ```bash
-uv run pytest -q                    # 395 tests, ~2.9s, fully offline
+uv run pytest -q                    # 512 tests, ~6s, fully offline
 uv run mypy --strict src
 uv run ruff check .
 uv run python -m omega_coding.evals # smoke eval: does the assembled agent still work?
