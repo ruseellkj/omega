@@ -138,7 +138,7 @@ scorecard stays at **8 of 9** until then.
 | ~~**Session branching**~~ **LANDED** | `load()` read the file linearly, so a fork would have returned both attempts at once | `session/tree.py` — `path_to`, `leaves`, cycle detection; `/rewind` | **filled** |
 | ~~**Structured logging**~~ **LANDED** | Debugging meant reading print output — which a TUI removes | `eventlog.py`, a second listener on the same event stream | **filled** |
 | **Image reading** | Screenshots cannot be handed to the model | `types.py` content blocks are a discriminated union; an image block is an addition, not a change | **exists** |
-| **Subagents *or* plan mode** | No task decomposition | `before_tool_call` plus the headless driver. A subagent **is** the headless driver, called from a tool | **exists** |
+| ~~**Subagents**~~ **LANDED** | No task decomposition, and exploration filled the parent's context | `subagent.py` — `run_headless` called from a `Tool`. Nothing below it changed | **filled** |
 | ~~**Redaction at the transcript boundary**~~ **LANDED** | Redaction sat on `after_tool_call`, which fires only when a tool *returns a value*. Four paths went around it | `before_record` in `hooks.py`, consulted by `harness._record` | **built** |
 
 ### Compaction — landed
@@ -398,6 +398,52 @@ The old branch is still in the session file - /sessions still lists it.
 `leaves()` lists them, so the mechanism is complete, but choosing between two
 attempts by pasting a hex id is not a feature. That wants the TUI, and is the
 obvious next thing to hang off it.
+
+### Subagents — landed, and the Tier 2 claim held
+
+`headless.py` has claimed since Tier 2 that *"a subagent **is** this function
+called from inside a tool."* It is. `subagent.py` is a `Tool` whose `execute`
+calls `run_headless`, and **nothing in the loop, the harness, or the provider
+contract changed to make it work.** Had it needed a new mechanism, the layering
+argument would have been wrong; this is where that would have shown.
+
+**What it buys is failure #1 from the other side.** "Where is authentication
+handled?" can mean reading twenty files. Asked in the main conversation, all
+twenty land in the context and stay there — every later turn re-sends and re-pays
+for them. Asked through a subagent, the parent gains one paragraph and the twenty
+files are discarded with the child. Compaction makes a full context survivable;
+this keeps it from filling.
+
+So the tested property is not "it can run a nested agent" — it is **what the
+parent does not inherit**. The test writes 200 lines into a file, has the child
+read it, and asserts the parent's result is the one-line summary and contains
+none of the file.
+
+**Two things had to be right, and both are enforced rather than promised:**
+
+* **Recursion is stopped by absence, not a counter.** A child holding this tool
+  could spawn one forever, and the loop cannot tell — a nested agent is an
+  ordinary tool call that happens to be slow. The child gets the parent's tool
+  list with this tool filtered out. A counter would work and would be one more
+  thing to remember to increment; a tool that is not there cannot be called.
+* **The child runs under the parent's hooks.** Approval, redaction, history. A
+  fresh policy for the child would be a second place for a deny list to be
+  correct — the mistake `paths.py` warns about and `!cmd` made for real. A
+  refusal is a refusal at any depth, and there is a test that refuses everything
+  and checks the child's call arrived at the parent's gate.
+
+**mypy found a bug two of my own tests had missed.** The turn-limit branch
+compared `reason == "length"`, but the loop's cap is `max_turns` — `length` is
+the *provider* running out of output tokens, a different thing. The branch could
+never fire. The test passed anyway, because it asserted only that the word
+"turn" appeared and the fallback message happens to contain it. Both fixed; the
+test now names the limit and the advice.
+
+**Deliberately not done:** no parallelism (tool calls are sequential and making
+these the exception would be a scheduling change dressed as a feature), no
+session file for the child, and **no nested cost line** — the child's tokens are
+real and are not separately reported, which is worth knowing before trusting
+`/cost` while using it.
 
 ### The ordering constraint
 

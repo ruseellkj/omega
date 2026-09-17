@@ -43,6 +43,7 @@ from omega_coding.eventlog import EventLog, sweep_old_logs
 from omega_coding.history import drop_empty_failed_turns
 from omega_coding.redact import redact_message, redacting_hook
 from omega_coding.status import StatusLine
+from omega_coding.subagent import build_subagent_tool
 from omega_coding.system_prompt import PROJECT_INSTRUCTIONS_FILE, build_system_prompt
 from omega_coding.truncate import sweep_old_spills
 from omega_coding.tui import run_tui
@@ -394,6 +395,21 @@ def main() -> None:
         # model and tools as hook arguments, because widening `ContextTransform`
         # would touch `hooks.py`, `loop.py` and `history.py` to spare one line.
         transform_context=compactor,
+    )
+
+    # After `hooks`, deliberately: the child runs under the parent's gate and
+    # redaction, so the tool cannot be built before they exist. And appended to
+    # `tools` after the system prompt was built from it, so the prompt does not
+    # advertise a tool the subagent's own child will not have.
+    tools.append(
+        build_subagent_tool(
+            provider=provider,
+            model=model,
+            tools=tools,
+            root=root,
+            hooks=hooks,
+            approve=args.yes,
+        )
     )
 
     store = None if args.no_save else JsonlSessionStore(root)
