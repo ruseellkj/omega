@@ -133,7 +133,7 @@ scorecard stays at **8 of 9** until then.
 
 | Missing | What it costs today | The seam | Seam status |
 |---|---|---|---|
-| **A real TUI** | Print output cannot show a diff, a spinner, or a sidebar — and cannot accept a keystroke mid-turn | The 10 agent events (`agent_events.py:49-139`) | **exists** |
+| ~~**A real TUI**~~ **LANDED** | Print output could not accept a keystroke mid-turn, so steering was unreachable | `omega_coding/tui/` — Textual, behind `--tui` | **filled** |
 | ~~**Search tools**~~ **LANDED** | The model read whole files to find one line, and shelled out for the rest | `list_files`, `find_files`, `search_files` in `builtin_tools.py` | **filled** |
 | **Session branching** | You can rewind by reading the JSONL, but not fork and navigate | `parent_id` is already written on every entry (`session/entries.py`). Tier 3 adds `tree.py` — `path_to_entry`, cycle detection | **exists** |
 | ~~**Structured logging**~~ **LANDED** | Debugging meant reading print output — which a TUI removes | `eventlog.py`, a second listener on the same event stream | **filled** |
@@ -294,6 +294,61 @@ A second bug came from running it rather than reading it: `session_id` does not
 exist until the first turn creates it, so a path bound at construction named
 every session `unsaved.jsonl` and appended them all to one file. The path is now
 resolved per write.
+
+### The TUI — landed, behind `--tui`
+
+**411 lines across three modules**, against Tau's 10,828. The difference is
+listed below as decisions, not omissions.
+
+**It was worth a dependency for one reason: steering.** `TIER-2.md` recorded
+`queue_steering` as wired, tested, and unreachable by a human, because a
+`print`/`input` REPL cannot take a keystroke while a turn is running. That is now
+closed — type into the box mid-turn and the guidance is queued, acknowledged on
+screen, and drained by the loop after the current tool result. A prettier
+transcript would not have justified the dependency; a gap closing does.
+
+```
+omega_coding/tui/
+  state.py    97   what the screen should show — imports no Textual
+  adapter.py  98   the 10 agent events -> state changes
+  app.py     203   the screen, keybindings, the input box
+```
+
+**The split is the load-bearing part.** Nothing in `state.py` or `adapter.py`
+imports Textual, so **every behavioural test runs without a terminal** — 13 of
+the 15 assert on `TuiState` and never start an app. Tau keeps the same separation
+and gets a 99-line adapter from it; omega's is 98, which is the event vocabulary
+earning its keep rather than a coincidence.
+
+`cli.py:_render` was the specification, not a guide. Each of its branches has a
+matching test, because anything it handles and the adapter does not is a
+regression rather than a simplification.
+
+**Two bugs, both found by tests rather than by reading:**
+
+* A fast fake provider finished before the second keystroke landed, so the input
+  started a *second turn* and the steering test **passed against a build with no
+  steering at all**. Fixed with a provider slow enough that the turn is genuinely
+  in flight — the same class of false confidence as the `!rm -rf /` test.
+* Quitting mid-turn left the worker redrawing a screen that no longer existed,
+  raising `NoMatches` and taking the turn down with it.
+
+And one behaviour worth knowing, which looks like a broken queue and is not:
+**steering during the final turn of a run is not seen until the next run.** The
+loop drains between iterations, so a text-only turn ends with the queue
+untouched.
+
+**Deliberately not built**, so the gap is a decision:
+
+* **an approval modal** — `_ask_in_terminal` blocks on `input()` in a thread,
+  which cannot work under Textual. `--tui` therefore requires `--yes` and says so
+  rather than hanging on a prompt nobody can see. First thing to add next.
+* the print REPL stays the **default**: `--fake`, piped stdin, the headless
+  driver and the approval prompt all work there, and piped stdin is how this
+  project has been verified all along.
+* themes, autocomplete, file drop, notifications, a session picker, mouse
+  support, markdown rendering, and a diff view for `edit_file` — that last one
+  being the most obviously missing.
 
 ### The ordering constraint
 

@@ -9,6 +9,7 @@ dependencies = [
     "openai>=3.3.1",
     "pydantic>=2.11",
     "python-dotenv>=1.2.2",
+    "textual>=8.2.8",
 ]
 
 [project.scripts]

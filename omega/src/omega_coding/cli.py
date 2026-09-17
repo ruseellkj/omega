@@ -45,6 +45,7 @@ from omega_coding.redact import redact_message, redacting_hook
 from omega_coding.status import StatusLine
 from omega_coding.system_prompt import PROJECT_INSTRUCTIONS_FILE, build_system_prompt
 from omega_coding.truncate import sweep_old_spills
+from omega_coding.tui import run_tui
 
 _ARG_PREVIEW = 80
 _RESULT_PREVIEW = 100
@@ -255,6 +256,15 @@ def main() -> None:
         help="List saved sessions for this project and exit.",
     )
     parser.add_argument(
+        "--tui",
+        action="store_true",
+        help=(
+            "Run the terminal UI instead of the print REPL. Lets you type while a "
+            "turn is running to steer it. Requires --yes: approval prompts have no "
+            "modal yet."
+        ),
+    )
+    parser.add_argument(
         "--no-log",
         action="store_true",
         help="Do not write a structured event log for this session.",
@@ -439,6 +449,21 @@ def main() -> None:
         else:
             restored = harness.resume(session_id)
             print(f"Resumed {session_id} ({restored} messages).")
+
+    if args.tui:
+        # Said rather than discovered. `_ask_in_terminal` blocks on `input()` in a
+        # thread, which cannot work under Textual - without --yes the first tool
+        # call would wait forever on a prompt nobody can see. An approval modal is
+        # the first thing to add here.
+        if not args.yes:
+            print(
+                "--tui needs --yes for now: approval prompts have no modal yet, and "
+                "a prompt you cannot see is a hang.",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        asyncio.run(run_tui(harness))
+        return
 
     asyncio.run(
         _repl(
