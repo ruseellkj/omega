@@ -1,0 +1,33 @@
+{
+  "name": "slate",
+  "dark": true,
+  "colors": {
+    "background": "#14161A",
+    "surface": "#1C1F26",
+    "foreground": "#E8EAED",
+    "muted": "#8E959F",
+    "accent": "#D4D8DE",
+    "secondary": "#9AA3AF",
+    "success": "#A7BFA3",
+    "warning": "#C9BC8E",
+    "error": "#D49A96"
+  },
+  "roles": {
+    "user": {
+      "border": "",
+      "body": "#E8EAED on #2A2E36"
+    },
+    "assistant": {
+      "border": "",
+      "body": "#E8EAED"
+    },
+    "tool": {
+      "border": "",
+      "body": "#8E959F"
+    },
+    "notice": {
+      "border": "",
+      "body": "#C9BC8E"
+    }
+  }
+}

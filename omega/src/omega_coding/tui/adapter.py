@@ -5,21 +5,36 @@ renderer or for a printer.** It is short because the events already say what a U
 needs; if it had to reach into the harness, inspect messages, or track flags of
 its own, the vocabulary would have been wrong and this is where that would show.
 
-`cli.py:_render` is the specification, not a rough guide. It was written
-standalone precisely so this swap touches one function, and every branch it has
-is reproduced here:
+`cli.py:_render` was the specification, and for one tier this file matched it
+branch for branch. It no longer does, and the places it diverges are the places a
+screen can do something a printer cannot:
 
-| `_render` | here |
+| `_render` (print) | here (screen) |
 |---|---|
 | `text_delta` → `print(delta, end="")` | `append_stream(delta)` |
 | `text_end` → `print()` | `close_stream()` |
-| `tool_execution_start` → `→ name(args)` | a `tool` row |
-| `tool_execution_end` → `<` or `x` + first line | a `tool` row with `is_error` |
+| `tool_execution_start` → `→ name(args)` | opens a row titled `describe(call)` |
+| `tool_execution_end` → first line only | **closes that same row**, keeping all output |
+| *(ignored)* | `thinking_start/end` → `state.thinking` |
+| *(ignored)* | `message_end` → token counts |
 | `agent_end` aborted → `[cancelled]` | a `notice` row |
 | `agent_end` not stop → `[reason] message` | a `notice` row |
 
-Anything `_render` handles and this does not is a regression, not a
-simplification.
+The three that differ, and why:
+
+* **the tool row.** A printer has nowhere to put 2,000 lines of output, so
+  `_render` keeps the first and drops the rest. A collapsible row has somewhere,
+  so the title is a receipt and the payload stays in `output`.
+* **thinking.** `status.py:271-277` already acted on these events; the UI
+  dropping them meant the REPL could say "thinking" and the screen could not.
+  An oversight, not a decision.
+* **`message_end`.** The only event carrying `usage` (`cost.py:103` reads the
+  same one). Ignoring it is why the TUI could not show what a turn cost.
+
+**Still true: anything `_render` handles and this drops is a regression.** The
+rows above that say "ignored" go the other way — the print renderer is the one
+behind now, and that is fine, because a status line it erases cannot hold state a
+screen keeps.
 
 **It touches no widget.** Everything here mutates `TuiState`; the display reacts
 to that. See `state.py` for why the split earns its keep.
@@ -28,17 +43,8 @@ to that. See `state.py` for why the split earns its keep.
 from __future__ import annotations
 
 from omega_agent.agent_events import AgentEvent
+from omega_coding.status import describe
 from omega_coding.tui.state import TuiState
-
-#: Long tool arguments and long results are clipped in the row, not on screen.
-#: The same limits `cli.py` uses, so the two frontends agree about what "one
-#: line of tool output" means.
-ARGUMENT_PREVIEW = 80
-RESULT_PREVIEW = 100
-
-
-def _clip(text: str, limit: int) -> str:
-    return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
 class TuiEventAdapter:
@@ -67,26 +73,52 @@ class TuiEventAdapter:
                 state.append_stream(raw.delta)
             elif raw.type == "text_end":
                 state.close_stream()
+            elif raw.type == "thinking_start":
+                # Dropped until now, while `status.py:271-277` acted on it — so
+                # the REPL could say "thinking" and the UI could not. The state
+                # is real and provider-reported; refusing to show it was an
+                # oversight, not a decision.
+                state.thinking = True
+            elif raw.type == "thinking_end":
+                state.thinking = False
 
         elif event.type == "tool_execution_start":
             # Close the stream first: a turn that says "let me check" and then
             # calls a tool must show the text above the call, not merged into it.
             state.close_stream()
             call = event.tool_call
-            state.add("tool", f"→ {call.name}({_clip(str(call.arguments), ARGUMENT_PREVIEW)})")
+            # `describe` rather than `name(args)`: "running npm test" is the same
+            # information in the words a person would use, and it is the string
+            # the REPL's status line already shows for this call.
+            state.activity = describe(call)
+            state.open_tool(call.id, call.name, call.arguments, state.activity)
 
         elif event.type == "tool_execution_end":
             result = event.result
-            first_line = result.text.splitlines()[0] if result.text else ""
-            marker = "x" if result.is_error else "<"
-            state.add(
-                "tool",
-                f"  {marker} {_clip(first_line, RESULT_PREVIEW)}",
+            call = event.tool_call
+            state.close_tool(
+                call.id,
+                label=describe(call, done=True),
+                output=result.text,
                 is_error=result.is_error,
             )
+            # The step is over; anything still shown would be describing the
+            # past. `agent_end` clears it too, for the turn that ends here.
+            state.activity = ""
+
+        elif event.type == "message_end":
+            # The only event carrying `usage`, which is why the TUI had no token
+            # counts while the REPL did (`cost.py:103` reads the same event).
+            usage = event.message.usage
+            state.tokens_in += usage.input
+            state.tokens_out += usage.output
+            state.tokens_cached += usage.cache_read
+            state.thinking = False
 
         elif event.type == "agent_end":
             state.close_stream()
+            state.activity = ""
+            state.thinking = False
             state.running = False
             state.last_reason = event.reason
             if event.reason == "aborted":

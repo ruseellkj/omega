@@ -72,32 +72,66 @@ def _clip(text: str, width: int = _TARGET_WIDTH) -> str:
     return collapsed if len(collapsed) <= width else collapsed[: width - 1] + "…"
 
 
-def describe(call: ToolCall) -> str:
-    """What this tool call is doing, in words, with its target.
+#: Present and past tense for every tool, with the argument that names its
+#: target. One table rather than three, because the same wording has to serve the
+#: REPL's live status line, print mode's stderr trace, and the TUI's tool row —
+#: and three copies of "reading"/"read" is three chances for them to disagree.
+#:
+#: The past tense is not decoration. A row that still says "running npm test"
+#: after it finished reads as hung; "ran npm test" reads as done, which is the
+#: whole difference between a progress line and a transcript entry.
+#: The fourth field is what to say when the target argument is absent. Needed
+#: because `list_files` legitimately takes no path, and the obvious fallback —
+#: the tool's own name — produced "listing list files".
+_VERBS: dict[str, tuple[str, str, str, str]] = {
+    # tool name:    (present,     past,           target argument, no-target noun)
+    "run_shell":    ("running",   "ran",          "command", "a command"),
+    "read_file":    ("reading",   "read",         "path",    "a file"),
+    "write_file":   ("writing",   "wrote",        "path",    "a file"),
+    "edit_file":    ("editing",   "edited",       "path",    "a file"),
+    "read_image":   ("viewing",   "viewed",       "path",    "an image"),
+    "list_files":   ("listing",   "listed",       "path",    "this directory"),
+    "find_files":   ("finding",   "found",        "pattern", "files"),
+    "search_files": ("searching", "searched for", "pattern", "the files"),
+    "run_subagent": ("delegating", "delegated",   "task",    "a subtask"),
+}
+
+
+def describe(call: ToolCall, *, done: bool = False) -> str:
+    """What this tool call is doing — or did — in words, with its target.
 
     "running tests" beats "run_shell", and both beat *Percolating*. The argument
     is included because *which* file is the part you actually want while waiting.
+
+    A tool with no entry in `_VERBS` degrades to its own name rather than
+    guessing a verb: a wrong verb is worse than a bare identifier, and a new tool
+    should read as unfamiliar rather than as something it is not.
     """
-    arguments = call.arguments
+    verbs = _VERBS.get(call.name)
+    if verbs is None:
+        return call.name
 
-    if call.name == "run_shell":
-        command = " ".join(str(arguments.get("command", "")).split())
-        if not command:
-            return "running a command"
-        # The whole command would routinely be wider than the terminal, so a long
-        # one degrades to its first word rather than being cut mid-flag.
-        if len(command) <= _TARGET_WIDTH:
-            return f"running {command}"
-        return f"running {command.split()[0]}…"
+    present, past, argument, bare = verbs
+    verb = past if done else present
+    target = call.arguments.get(argument)
 
-    path = arguments.get("path")
-    if isinstance(path, str):
-        verb = {"read_file": "reading", "write_file": "writing", "edit_file": "editing"}.get(
-            call.name, call.name
-        )
-        return f"{verb} {_clip(path)}"
+    if not isinstance(target, str) or not target.strip():
+        return f"{verb} {bare}"
 
-    return call.name
+    collapsed = " ".join(target.split())
+    if len(collapsed) <= _TARGET_WIDTH:
+        return f"{verb} {collapsed}"
+    # A long command degrades to its first word rather than being cut mid-flag —
+    # `npm test --reporter=…` cut at 40 characters says nothing useful. The word
+    # itself is still clipped, because a single 200-character token is not a
+    # word in any sense that helps.
+    if argument == "command":
+        first = collapsed.split()[0]
+        # `_clip` supplies its own ellipsis, so only add one when the word itself
+        # was short enough to survive and the *rest* of the command is what got
+        # dropped. Otherwise the line ends "……".
+        return f"{verb} {first}…" if len(first) <= _TARGET_WIDTH else f"{verb} {_clip(first)}"
+    return f"{verb} {_clip(collapsed)}"
 
 
 class StatusLine:

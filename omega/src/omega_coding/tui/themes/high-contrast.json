@@ -1,0 +1,33 @@
+{
+  "name": "high-contrast",
+  "dark": true,
+  "colors": {
+    "background": "#000000",
+    "surface": "#101010",
+    "foreground": "#FFFFFF",
+    "muted": "#B0B0B0",
+    "accent": "#FF8FA3",
+    "secondary": "#7CFFB2",
+    "success": "#7CFFB2",
+    "warning": "#FFD166",
+    "error": "#FF5C5C"
+  },
+  "roles": {
+    "user": {
+      "border": "",
+      "body": "#FFFFFF on #262626"
+    },
+    "assistant": {
+      "border": "",
+      "body": "#FFFFFF"
+    },
+    "tool": {
+      "border": "",
+      "body": "#B0B0B0"
+    },
+    "notice": {
+      "border": "",
+      "body": "#FFD166"
+    }
+  }
+}

@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from omega_agent.agent_events import AgentEvent
+from omega_coding.redact import redact
 
 #: Written by default; a debug log you have to remember to switch on is one you
 #: do not have when it matters. Swept by age, like the truncation spill files.
@@ -104,7 +105,22 @@ class EventLog:
         call = getattr(event, "tool_call", None)
         if call is not None:
             record["tool"] = call.name
-            record["arguments"] = call.arguments
+            # **Masked here, and this was the sixth redaction bypass.**
+            #
+            # `harness._clean_event` runs `before_record` over the `message` an
+            # event carries and over a tool `result` — but never over
+            # `tool_call`, which is a separate copy living on the two tool
+            # events. The transcript is safe because `redact_message` does walk
+            # into tool-call arguments; this log was not, because it reads the
+            # event's own copy.
+            #
+            # Found by a test that failed with redaction fully enabled:
+            # `echo sk-ant-…` landed in `~/.omega/logs/*.jsonl` in plain text.
+            #
+            # Fixed at the sink rather than by widening the hook: `before_record`
+            # is typed for `AgentMessage`, and a `ToolCall` is not one. A log
+            # that masks what it writes needs no change in `omega_agent` at all.
+            record["arguments"] = json.loads(redact(json.dumps(call.arguments, default=str))[0])
 
         result = getattr(event, "result", None)
         if result is not None:

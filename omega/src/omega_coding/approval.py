@@ -242,6 +242,22 @@ class ApprovalPolicy:
         #: `_always` because the grain differs — see the module docstring.
         self._always_dirs: set[Path] = set()
 
+    def use_asker(self, asker: Asker) -> None:
+        """Install the approval channel after construction.
+
+        **Why this is a setter and not a constructor argument.** The TUI's asker
+        is a closure over a running `App`, and the app cannot be built until the
+        harness is, which cannot happen until the hooks — including this policy —
+        exist. Something has to be late, and a one-line setter is a smaller lie
+        than building the policy inside the UI layer would be.
+
+        Safe to be late, because the unset state is *refusal*: `__call__` denies
+        when `_asker is None` rather than falling through to allow. A UI that
+        forgot to call this gets a blocked tool and a message saying so, not a
+        silent auto-approve.
+        """
+        self._asker = asker
+
     def _outside_path(self, call: ToolCall) -> Path | None:
         """The resolved path this call touches, if it lands outside the root.
 

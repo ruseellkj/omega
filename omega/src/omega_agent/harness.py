@@ -198,6 +198,27 @@ class Harness:
         """
         self._steering.append(UserMessage(content=text))
 
+    def unqueue_steering(self) -> str | None:
+        """Take back the most recently queued steering message, if it is still here.
+
+        **The queue was write-only**, which made "I typed that in a hurry" a
+        thing you could not undo: the message was already committed to the next
+        request and the only way out was cancelling the whole turn. This is the
+        smallest thing that fixes it — the last message, and only while it is
+        still waiting.
+
+        Returns None once the loop has drained the queue, because by then the
+        correction is part of the conversation and taking it back would mean
+        editing history rather than editing a draft.
+        """
+        if not self._steering:
+            return None
+        message = self._steering.pop()
+        content = message.content
+        if isinstance(content, str):
+            return content
+        return "".join(getattr(block, "text", "") for block in content)
+
     def queue_follow_up(self, text: str) -> None:
         """Queue the next task, to start when the current one finishes."""
         self._follow_ups.append(UserMessage(content=text))

@@ -1,0 +1,33 @@
+{
+  "name": "oxblood-dark",
+  "dark": true,
+  "colors": {
+    "background": "#191412",
+    "surface": "#211A17",
+    "foreground": "#E8DFD4",
+    "muted": "#A79A8E",
+    "accent": "#D08494",
+    "secondary": "#8FA891",
+    "success": "#8FA891",
+    "warning": "#C9A66B",
+    "error": "#E2736B"
+  },
+  "roles": {
+    "user": {
+      "border": "",
+      "body": "#E8DFD4 on #2A2320"
+    },
+    "assistant": {
+      "border": "",
+      "body": "#E8DFD4"
+    },
+    "tool": {
+      "border": "",
+      "body": "#A79A8E"
+    },
+    "notice": {
+      "border": "",
+      "body": "#C9A66B"
+    }
+  }
+}
