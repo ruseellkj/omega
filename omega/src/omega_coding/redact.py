@@ -41,6 +41,12 @@ from omega_agent.types import (
 #: Specific, high-confidence shapes. Anthropic is listed before OpenAI because
 #: the OpenAI pattern would otherwise swallow `sk-ant-...` and mislabel it.
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    # **Before the general Anthropic rule**, or that one wins and calls a
+    # subscription token an API key. Measured when account sign-in shipped: the
+    # existing pattern already masked `sk-ant-oat…`, so nothing leaked — but a
+    # transcript reading "[redacted Anthropic API key]" where a user pasted an
+    # OAuth token sends them to revoke the wrong credential.
+    ("Anthropic OAuth token", re.compile(r"sk-ant-o[a-z]{2}[0-9]*-[A-Za-z0-9_\-]{16,}")),
     ("Anthropic API key", re.compile(r"sk-ant-[A-Za-z0-9_\-]{16,}")),
     ("OpenAI API key", re.compile(r"sk-(?:proj-)?[A-Za-z0-9_\-]{20,}")),
     ("GitHub token", re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}")),

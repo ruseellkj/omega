@@ -97,15 +97,54 @@ CACHE_CONTROL: dict[str, Any] = {"type": "ephemeral"}
 CACHEABLE_BLOCK_TYPES = frozenset({"text", "image", "tool_result"})
 
 
-def _cacheable_system(system: str) -> list[dict[str, Any]]:
-    """The system prompt as one cacheable block.
+#: An Anthropic OAuth access token. The prefix is the whole test, and it is the
+#: test Pi uses (`anthropic-messages.ts:843-845`): an API key and a subscription
+#: token go to the same endpoint but authenticate differently, and nothing else
+#: in the request distinguishes them.
+OAUTH_TOKEN_PREFIX = "sk-ant-oat"
+
+#: What Anthropic requires alongside an OAuth token. Not optional and not
+#: cosmetic - measured identically in both references
+#: (`oauth_anthropic.py:276-285`, `anthropic-messages.ts:902-904`).
+OAUTH_HEADERS: dict[str, str] = {
+    "anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
+    "user-agent": "claude-cli/omega",
+    "x-app": "cli",
+}
+
+#: The first system block an OAuth request must carry. Pi's comment on the same
+#: line reads "we MUST include Claude Code identity"
+#: (`anthropic-messages.ts:976`); Tau sets the identical string
+#: (`provider_runtime.py:83`).
+#:
+#: **This is the part of the borrowed client id that reaches the model**, not
+#: just the authorisation server: every OAuth turn opens by telling Claude it is
+#: a different product. `omega_coding/oauth.py` records why that trade was made.
+CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude."
+
+
+def _is_oauth(token: str | None) -> bool:
+    return bool(token) and str(token).startswith(OAUTH_TOKEN_PREFIX)
+
+
+def _cacheable_system(system: str, *, oauth: bool = False) -> list[dict[str, Any]]:
+    """The system prompt as one cacheable block - two, when signed in by account.
 
     A plain string cannot carry a marker, so the prompt becomes a one-element
     list of content blocks. The text is byte-identical either way; only the
     envelope changes, which matters because a single changed character
     invalidates every prefix hashed behind it.
+
+    The identity block goes **first and unmarked**. First because Anthropic reads
+    it as the leading instruction, and unmarked because a breakpoint on it would
+    spend one of four on a fixed sentence that the next block's marker already
+    covers - a breakpoint hashes the entire prefix up to itself.
     """
-    return [{"type": "text", "text": system, "cache_control": dict(CACHE_CONTROL)}]
+    blocks: list[dict[str, Any]] = []
+    if oauth:
+        blocks.append({"type": "text", "text": CLAUDE_CODE_IDENTITY})
+    blocks.append({"type": "text", "text": system, "cache_control": dict(CACHE_CONTROL)})
+    return blocks
 
 
 def _cacheable_tools(tools: list[Tool]) -> list[dict[str, Any]]:
@@ -329,10 +368,23 @@ class AnthropicProvider:
         #: needs, and it costs about ten lines to have now instead of later.
         self._auth = auth
 
+        resolved = api_key or os.environ.get("ANTHROPIC_API_KEY")
+
+        #: Which credential kind is in play. Held here rather than read back off
+        #: the client, because the client is swappable — `tests/stub_anthropic.py`
+        #: passes a plain object — and an adapter that interrogates its transport
+        #: for state it already knows is an adapter that breaks when the
+        #: transport changes.
+        self._oauth = _is_oauth(resolved)
+
         #: Only a client we built is ours to close. See `aclose`.
         self._owns_client = client is None
         self._client = client or AsyncAnthropic(
-            api_key=api_key or os.environ.get("ANTHROPIC_API_KEY")
+            # Exactly one of these, never both: a client holding an `api_key`
+            # *and* an `auth_token` sends `X-Api-Key` and `Authorization`
+            # together. Measured, not assumed.
+            api_key=None if self._oauth else resolved,
+            auth_token=resolved if self._oauth else None,
         )
 
 
@@ -454,8 +506,18 @@ class AnthropicProvider:
 
         # Resolved here, not in __init__, and re-resolved on every retry - which
         # is exactly what makes an expiring token survivable.
+        #
+        # **Both fields are assigned, always.** Measured: a client holding an
+        # `api_key` *and* an `auth_token` sends `X-Api-Key` and `Authorization`
+        # together, so leaving the stale one in place after a /login would put a
+        # dead API key on the wire beside a live subscription token. Setting the
+        # unused one to None is what makes the swap a swap.
         if self._auth is not None:
-            self._client.api_key = await self._auth()
+            token = await self._auth()
+            self._oauth = _is_oauth(token)
+            self._client.auth_token = token if self._oauth else None
+            self._client.api_key = None if self._oauth else token
+        oauth = self._oauth
 
         # Built before the call so the breakpoints are visible in one place.
         # `to_anthropic_messages` stays a pure translator; marking happens here,
@@ -470,12 +532,15 @@ class AnthropicProvider:
             # Four breakpoints, spent deliberately: system, the last tool, and
             # the two message tails. Anthropic hashes the whole prefix up to and
             # including a marked block, so each one buys everything behind it.
-            system=cast("Any", _cacheable_system(system)),
+            system=cast("Any", _cacheable_system(system, oauth=oauth)),
             # The translators return plain dicts on purpose: it keeps them
             # testable without constructing SDK objects. Casting here is the
             # honest place to reconcile that with the client's typed params.
             messages=cast("Iterable[MessageParam]", payload_messages),
             tools=cast("Iterable[ToolParam]", _cacheable_tools(tools)),
+            # Sent per request rather than fixed at construction, because which
+            # credential is in play is only known after `self._auth` has run.
+            extra_headers=OAUTH_HEADERS if oauth else None,
         ) as stream:
             async for raw in stream:
                 if signal is not None and signal.is_cancelled():
