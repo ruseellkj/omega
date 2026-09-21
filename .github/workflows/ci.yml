@@ -1,0 +1,49 @@
+# The four gates, on every push and pull request.
+#
+# The repository had no CI at all before this. That mattered more once a publish
+# workflow existed: a release on PyPI can be yanked but never replaced, so the
+# gates belong somewhere that runs *before* anyone cuts one — not only inside the
+# publish job where failing is already too late to be cheap.
+#
+# `--locked` rather than a plain sync, so a lockfile that has drifted from
+# `pyproject.toml` fails here instead of resolving to something nobody tested.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: tests · types · lint · evals
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: omega
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --locked
+
+      - name: Tests
+        run: uv run pytest -q
+
+      - name: Types
+        run: uv run mypy --strict src
+
+      - name: Lint
+        run: uv run ruff check .
+
+      # Offline by design — no network, no key. If this ever needs either, the
+      # eval has stopped being an eval.
+      - name: Evals
+        run: uv run python -m omega_coding.evals

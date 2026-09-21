@@ -1,0 +1,64 @@
+# Publish omega-coding to PyPI.
+#
+# Mirrors Tau's `research/tau/.github/workflows/publish.yml`, and the design
+# decision worth copying is the trigger: **a published GitHub Release, not a
+# push to main.** A version bump that never gets a release simply does not
+# publish, which makes the failure mode silence rather than an accidental upload.
+#
+# `id-token: write` plus the `pypi` environment is PyPI Trusted Publishing — no
+# API token in repository secrets. It needs a one-time setup on PyPI: add
+# `rushil-searce/cli-agent`, workflow `publish.yml`, environment `pypi`.
+#
+# omega lives in a subdirectory, so every step runs from `omega/`. GitHub only
+# reads `.github/workflows` at the repository root, which is why this file is
+# not next to the package it builds.
+name: Publish omega-coding
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Build and publish to PyPI
+    runs-on: ubuntu-latest
+    environment: pypi
+    defaults:
+      run:
+        working-directory: omega
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # The four gates, before anything is uploaded. A publish workflow without
+      # them can ship code that does not import — and a release on PyPI cannot
+      # be replaced, only yanked.
+      - name: Install
+        run: uv sync --locked
+
+      - name: Tests
+        run: uv run pytest -q
+
+      - name: Types
+        run: uv run mypy --strict src
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Evals
+        run: uv run python -m omega_coding.evals
+
+      - name: Build
+        run: uv build
+
+      - name: Publish
+        run: uv publish
