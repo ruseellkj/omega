@@ -1,6 +1,6 @@
 # omega — Tier 3
 
-What this tier will contain, and what it deliberately leaves to Tier 3+.
+What this tier will contain, and what it deliberately leaves to the product backlog.
 
 **Status: every row filled. Written before the code, kept honest afterwards.**
 
@@ -75,7 +75,7 @@ These are the scorecard. Everything else in this file is a feature; these two ar
 | **Prompt caching** — failure **#9** — *markers sent, hit unconfirmed* | Every turn re-bills the system prompt and the whole tool schema block | Not a hook — a **constraint**. Cache markers need a byte-identical prefix, which is why `OMEGA.md` is prepended once at startup and never regenerated per turn | n/a |
 
 Closing these two takes the beginner scorecard from **7 of 9** to **9 of 9**, which is the whole
-point of the tier and the reason it comes before anything on the Tier 3+ list.
+point of the tier and the reason it comes before anything on the the product backlog list.
 
 **#1 is now closed.** The scorecard stands at **8 of 9**.
 
@@ -279,14 +279,36 @@ A fourth was found only by running the tests: `fnmatch` has no notion of a path
 separator, so `**/*.py` silently missed every top-level file.
 `PurePosixPath.full_match` implements real glob semantics and fixed it.
 
-### The httpcore traceback, again — and it was a second bug
+### The httpcore traceback — **and the claim below it was wrong**
 
-The per-turn traceback fixed earlier was a new event loop per prompt. A
-shutdown-time one survived it, with a different cause: the provider's HTTP client
-was never closed, so its connection pool was collected at interpreter shutdown —
-after the event loop was gone. Both adapters now have `aclose()`, closing only a
-client they created, and `_repl` calls it on every exit path. Measured after:
-`0 occurrences` of `athrow` in a full session.
+The per-turn traceback fixed earlier was a new event loop per prompt. A second,
+shutdown-time one survived it, and the diagnosis was that the provider's HTTP
+client was never closed, so its connection pool was collected at interpreter
+shutdown — after the event loop was gone. Both adapters gained `aclose()`,
+closing only a client they created, and `_repl` calls it on every exit path.
+
+**That fix was real and it did not fix this.** The line that used to stand here —
+"Measured after: `0 occurrences` of `athrow` in a full session" — came from a run
+that happened not to trigger it, and was reported as a fix. It is not one.
+
+Re-measured properly, against the **bare OpenAI SDK with no omega in the
+picture**:
+
+```
+mode: nothing      → 4 athrow occurrences
+mode: close        → 4
+mode: close_sleep  → 4
+```
+
+Closing the client changes nothing, because omega is not what fails to close it.
+The traceback is upstream — `openai 3.3.1` / `httpx 0.28.1` / `httpcore2 2.12.0`
+on Python 3.14 — and it fires from the async-generator shutdown hook *after* the
+answer has been printed. Cosmetic, and not ours.
+
+`aclose()` stays: the client genuinely was not being closed, and closing it is
+correct regardless of what it does or does not silence. The lesson is the one
+CLAUDE.md rule 2 already states, applied to a case where it was skipped: a single
+clean run is not a measurement.
 
 ### Structured logging — landed, and it found a fifth redaction bypass
 
@@ -602,11 +624,83 @@ Recorded so each absence is a decision rather than an oversight.
 
 - **No MCP, no retrieval/RAG.** Neither reference implements them.
 - **No packaging, no install script, no PyPI release.** omega runs through `uv run` at Tier 3.
-  Shipping is a product concern and is the first section of `TIER-3-PLUS.md`.
-- **No OAuth, no provider catalog, no extensions, no themes, no skills.** All Tier 3+, all listed
+  Shipping is a product concern and is the first section of `PRODUCT-BACKLOG.md`.
+- **No OAuth, no provider catalog, no extensions, no themes, no skills.** All the product backlog, all listed
   in that file with the Tau module that proves each is a real category of work.
-- **No sandboxing.** Tier 3+, and its `prepare` seam already shipped in Tier 2 (`hooks.py`,
+- **No sandboxing.** the product backlog, and its `prepare` seam already shipped in Tier 2 (`hooks.py`,
   `builtin_tools.py`) so it lands without surgery.
+
+---
+
+## Part 4 — Two things a cancelled turn loses
+
+Found by cancelling a real turn mid-stream and reading what survived, rather than by reasoning
+about it. Both are open, both are small, and the design decision on the second one has been made
+already so that it does not have to be made again under time pressure.
+
+**What a cancel does keep**, measured:
+
+```
+harness.messages                    session file (the same four, verbatim)
+  user       'do the thing'           role=user
+  assistant  stop='toolUse'           role=assistant  stop=toolUse
+  toolResult 'hi\n'                   role=toolResult
+  assistant  stop='aborted'           role=assistant  stop=aborted
+
+tool calls=1   tool results=1   orphans=0
+```
+
+The partial answer is kept and marked `aborted`, and the pairing holds because
+`execute_tool_call` returns a result even when the call was cancelled (`loop.py:147`).
+`repair_orphans` runs at the top of every `run()` (`harness.py:403`) as a second line of defence.
+So the transcript stays valid, which is what makes "carry on from here" possible at all — it is a
+new turn over an intact conversation, not a rewind.
+
+### 1 · An aborted turn's tokens are billed and recorded as zero
+
+`CostTracker` sums `usage` off `message_end` (`cost.py:73-78`). On the aborted path that usage is
+`0/0`, measured — and the two providers are **not** in the same position:
+
+| | Is partial usage available? |
+|---|---|
+| Anthropic | **yes** — input arrives in `message_start`, output accumulates in `message_delta`, so the partial already carries it |
+| OpenAI | **no** — usage is only ever sent in a final usage-only chunk *after* generation ends (`openai.py:438-453`), and the cancel returns at `:436` before that chunk exists |
+
+omega already asks for it: `stream_options: {"include_usage": True}` is set at `openai.py:388`. The
+number is not missing because nobody requested it; it was never sent.
+
+So OpenAI has to be estimated — `estimate_request_tokens(system, context, tools)` for input, which
+already exists for compaction, and the streamed text's length for output. The alternative,
+draining the stream to completion to get the true figure, is **worse than the bug**: it pays for
+the whole response in order to measure a cancel that was meant to stop paying.
+
+**The decision, and it is the load-bearing part:** an estimate goes on **its own line and is never
+summed into the total.**
+
+```
+12,400 tokens · $0.04
+1 interrupted turn, ~1,050 tokens (estimated, not included)
+```
+
+Folding a chars/4 guess into a figure otherwise built from provider-reported numbers makes the
+*whole* figure an estimate, and leaves the reader no way to tell which part they can trust. A
+separate line is less tidy and strictly more useful. `context.py:7-12` already argues that chars/4
+is good enough for a threshold; money is not a threshold, which is exactly why the estimate has to
+be labelled rather than absorbed.
+
+### 2 · How long a turn took is never recorded
+
+`status.py` computes elapsed seconds for the spinner (`ELAPSED_AFTER_SECONDS`, `render`) and throws
+it away. Grep for `elapsed`, `duration`, `started_at` or `monotonic` across `omega_agent/` and
+`eventlog.py` returns nothing. So "that took 90 seconds" is visible while it happens and
+unanswerable afterwards, including in the session file, where it would cost one field.
+
+The fix is a `time.monotonic()` stamp at turn start carried onto the entry. Tau does keep this —
+`ChatItem.started_at` (`tui/state.py:52`) drives a live per-tool timer gated at one second so a
+quick read never flashes `(0s)`. Pi keeps neither a label nor a timer.
+
+**Both are deliberately not done.** They change a schema and an event payload in `omega_agent`,
+which is a bigger call than a UI fix, and neither blocks anything today.
 
 ---
 
@@ -621,7 +715,7 @@ and the word "final" belongs to only one of them.
 - **Tiers** are *delivery milestones*.
 
 **Tier 3 finishes the layer diagram** — L4 stops being partial. It does not finish omega. Everything
-a product needs that the diagram never described is Tier 3+, and that is a deliberate boundary
+a product needs that the diagram never described is the product backlog, and that is a deliberate boundary
 rather than a backlog that ran out of room.
 
 For scale, at the start of Tier 3:
@@ -632,5 +726,5 @@ For scale, at the start of Tier 3:
 | Tau | 36,414 | 90 |
 | Pi | 133,800 | — |
 
-omega is **17% of Tau** and **4.7% of Pi**. Tier 3 narrows that. Tier 3+ is the rest of it, and
+omega is **17% of Tau** and **4.7% of Pi**. Tier 3 narrows that. the product backlog is the rest of it, and
 omega is not trying to close it — the goal was always to understand the shape, not to ship a rival.

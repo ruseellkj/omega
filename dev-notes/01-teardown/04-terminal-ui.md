@@ -299,6 +299,180 @@ main-screen class structure; TUI framework imports; runtime dependency lists.
 
 ---
 
+## 7. What omega actually built, and the four decisions inside it
+
+Sections 1–6 study the references. This one is omega's own Layer 4, written after building it,
+because the survey above got one thing importantly wrong: it said the transferable content is
+*concepts* and the framework handles the rest. The concepts did transfer. What the framework does
+**not** hand you is the part that turned out to matter — deciding what a row *is*.
+
+### 7.1 The shape, in one paragraph
+
+Five files, and the split is the whole design:
+
+| File | Lines | Knows about |
+|---|---|---|
+| `tui/state.py` | 241 | rows, history, what is happening — **no Textual** |
+| `tui/adapter.py` | 130 | the ten agent events → state changes — **no Textual** |
+| `tui/banner.py` | 158 | the wordmark and the six startup facts — **no Textual** |
+| `tui/widgets.py` | 458 | what a row, a prompt box and a status line look like |
+| `tui/themes/__init__.py` | 267 | colour, as JSON |
+| `tui/approval.py` | 146 | the one modal |
+| `tui/config.py` | 54 | the remembered theme |
+| `tui/app.py` | 514 | when things happen: keys, workers, redraw |
+
+Eight files, **1,981 lines** with the four theme JSON files on top of that. The first three
+import no Textual at all. That is not tidiness — it is what lets thirty-odd
+behavioural tests run with no terminal, and it is the same split Tau uses to get a 99-line adapter
+(`research/tau/src/tau_coding/tui/adapter.py`).
+
+### 7.2 Decision one — a tool call is *one* row, not two
+
+The first version followed `cli.py:_render` exactly: `tool_execution_start` added a row,
+`tool_execution_end` added another. That is correct for a printer, where output only grows
+downward and the two lines can never be the same object.
+
+It is wrong for a screen, and the reason is worth stating as a rule:
+
+> **A printer renders events. A screen renders things.** The event that a tool started and the
+> event that it finished describe *one thing* — a call — and a UI that models them as two rows can
+> never show one call as one item.
+
+So `open_tool(call_id, …)` creates the row and `close_tool(call_id, …)` fills it in, matched by id.
+Everything the user asked for follows from that single change: a title that goes from "running
+pytest" to "ran pytest", a ✓/✗ that replaces a "…", and output you can open — none of which is
+expressible when the receipt and the payload are separate rows that do not know about each other.
+
+### 7.3 Decision two — the redraw had to stop being a rebuild
+
+`refresh_view` used to be three lines:
+
+```python
+pane.remove_children()
+pane.mount_all([Static(_style(row)) for row in self.state.rows])
+pane.scroll_end(animate=False)
+```
+
+and the docstring defended it: the transcript is tens of rows, and a redraw that cannot drift out
+of step with the state is worth more than the cycles a diff saves. That argument was sound **while
+a row had no state of its own**.
+
+A `Collapsible` has state of its own — open or shut — and that state lives in the widget, not in
+`TuiState`. So a rebuild throws it away, and the failure looks like this: you open a tool result,
+the agent streams one more token, and it snaps shut. Unusable, and invisible in any test that does
+not redraw *after* expanding.
+
+The fix is to update in place and append only when the transcript grows. The general shape:
+
+> **State a widget owns is state a rebuild destroys.** Either the widget owns nothing — in which
+> case rebuild freely — or the redraw has to be incremental. There is no third option, and which
+> one you are in is decided by the widget you chose, not by how many rows you have.
+
+### 7.4 Decision three — `describe()` was already written
+
+The complaint was that the UI said "working" for everything. The fix was not to write a status
+system; it was to notice that `status.py:describe()` had been turning a `ToolCall` into
+`"reading loop.py"` since Tier 2, and that only the print REPL was allowed to see it.
+
+It needed two changes to serve both: every tool in the verb table rather than four, and a tense —
+because `"running pytest"` on a row that has finished reads as hung, while `"ran pytest"` reads as
+done. One table, three consumers (REPL status line, print-mode stderr, TUI row title), so they
+cannot disagree about what a call is called.
+
+The general point, which is the opposite of the instinct:
+
+> When a second frontend needs something the first already computes, the work is **deleting the
+> assumption that it was frontend-specific** — not writing it again.
+
+### 7.5 Decision four — the approval modal is a prerequisite, not a feature
+
+`--tui` used to require `--yes`, because the approval asker calls `input()` on a thread and Textual
+paints over it. That was an honest trade while the TUI was opt-in.
+
+It stops being one the moment the TUI is the default, because `--yes` means *approve every write
+and every shell command without asking*. Flipping the default with that still in place would have
+converted a deliberate opt-in into a silent one — a safety regression shipped as a UI improvement.
+
+What made it cheap is that the seam already existed:
+
+```python
+Asker  = Callable[[ApprovalRequest], Awaitable[Answer]]   # approval.py:96
+Answer = Literal["once", "always", "deny"]                # approval.py:68
+```
+
+The gate never knew how the question reached a human. Swapping stdin for a `ModalScreen` is a new
+implementation of an existing type, and every judgement — the deny list, the outside-root rule, the
+non-recursive "always" — stays in `approval.py` where it is tested. **The seam is why a safety
+prerequisite cost ninety lines instead of a redesign.**
+
+One detail worth keeping: the policy is handed its asker on `on_mount`, because the asker closes
+over an `App` that does not exist when the hooks are built. That late binding is safe only because
+the unset state is *refusal* — `__call__` denies when `_asker is None`. Had it fallen through to
+allow, every tool call before the first paint would have been silently approved.
+
+### 7.6 What the references do differently, with evidence
+
+| | omega | Tau | Pi |
+|---|---|---|---|
+| expand tool output | per row, click or `ctrl+o` | global `ctrl+o` only (`tui/config.py:63`) | global `ctrl+o` only (`keybindings.ts:86`) |
+| command list | `OptionList`, prefix filter | a repainted `Static` (`tui/autocomplete.py`, 511 lines) | separate registry for autocomplete |
+| prompt history | stack of 100, draft preserved | last prompt only, empty input only (`app.py:4909`) | stack of 100, draft preserved (`editor.ts:399`) |
+| theme schema | 9 colours, 4 roles | 28 colours, 10 roles (`tui/themes/__init__.py`) | vars indirection |
+| launch banner | yes | **none anywhere** | first-run setup only (`first-time-setup.ts:29`) |
+
+Two of those are omega doing *less* on purpose (the theme schema, the autocomplete widget), two are
+it doing more because Textual made it free (`Collapsible`, `OptionList`), and one is its own choice
+(the banner). None of them is parity, and the table is here so that stays visible.
+
+### 7.8 Three bugs the layout had, and how each was found
+
+Recorded because none of them was found by reading, and two were invisible in a
+screenshot.
+
+**"The query box is half cut."** Literal. `Input` ships
+`border: tall $border-blurred; height: 3` in its `DEFAULT_CSS`
+(`widgets/_input.py:190-196`), which draws a heavy top edge and a thin bottom
+one. Setting `border: none` on a parent selector does not remove it; the
+supported switch is `compact=True` (`_input.py:283`), which is what a one-row
+prompt field wants anyway.
+
+**Three `dock: bottom` siblings do not stack — they overlap.** The status line,
+the prompt box and the footer were each docked to the bottom edge, so they all
+anchored to the *same* edge. Measured:
+
+```
+StatusBar  region=Region(x=0, y=32, width=88, height=1)
+PromptBox  region=Region(x=0, y=31, width=88, height=3)   <- covers y=31,32,33
+Footer     region=Region(x=0, y=33, width=88, height=1)
+```
+
+The box's bottom rule was painted over by the footer and its text row by the
+status. A screenshot showed a box missing its bottom edge and nothing else. The
+fix is to dock none of them: `#transcript { height: 1fr }` in a vertical layout
+pushes everything after it down in compose order, which is what was wanted.
+
+**The theme was stale, and the proof was a colour.** While inspecting the
+geometry above, the border came back as `Color(34, 28, 26)` — `#221C1A`, which is
+`oxblood-light`'s ink, in an app whose default is `oxblood-dark`. A test had
+written `~/.omega/tui.json` before the suite isolated that path, and the config
+had outlived it. Worth recording because the *symptom* reported was "the theme is
+light" and the *cause* was a test, two days earlier, in a different file.
+
+---
+
+### 7.7 What section 6 got right and what it missed
+
+Right: the framework choice. Textual absorbed diffing, throttling, layout, focus, mouse and key
+dispatch, and nothing in `app.py` decodes an escape sequence. Pi spends 14,184 lines on that layer;
+omega's is 1,981 including themes, a modal and a banner.
+
+Missed: the claim that Layer 4 is a *delegation*. Four of the five decisions above are not about
+the framework at all — they are about the data model behind it, and Textual has no opinion on any
+of them. The survey was reading the wrong half: the expensive part of a TUI is not drawing, it is
+deciding what the things being drawn are.
+
+---
+
 *Next: Layer 5 — `protocol`, `storage`, `server`, `client`, `evals`, and the extension system,
 where ~75 examples (including `subagent/`, `plan-mode/`, and `todo.ts`) turn out to carry most
 of what my notes assumed was missing.*

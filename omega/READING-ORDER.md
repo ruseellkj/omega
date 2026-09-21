@@ -1,7 +1,7 @@
 # Reading omega
 
-Thirty files across three packages. This is the order to read them in, and one
-line on each saying what it is.
+Fifty-two files across three packages. This is the order to read them in, and
+one line on each saying what it is.
 
 **Read package by package, in dependency order.** `omega_agent` imports nothing
 from the other two, so it goes first. `cli.py` imports from everywhere, so it
@@ -54,6 +54,7 @@ One module per **wire format**, not per vendor.
 | 16 | `retry.py` | 109 | Which failures are worth retrying, and for how long. A 429 means "not now"; a 400 means "not ever". |
 | 17 | `anthropic.py` | 441 | One wire format. The messy file, deliberately — all the vendor ugliness lives here so nothing above it has any. |
 | 18 | **`openai.py`** | **445** | A *different* wire format. **Read its docstring table first** — that comparison is the entire argument for the layer, and the tool-result row is the sharpest thing in the codebase. |
+| 18b | `openai_codex.py` | 720 | A **third** wire format, and the proof the layer was needed rather than tidy: a ChatGPT subscription opens `chatgpt.com/backend-api`, not `api.openai.com`, and speaks the Responses API. Read the docstring table against `openai.py`'s. |
 
 ---
 
@@ -83,6 +84,19 @@ neither imports it.
 | 27 | `cost.py` | 96 | What the run cost. Read why it ships **no price table**. |
 | 28 | `headless.py` | 113 | Run the agent with no keyboard. Also the benchmark interface, and at Tier 3+ a subagent is this function called from a tool. |
 | 29 | `evals.py` | 136 | Does the assembled agent still work? Not a test — read the docstring on the difference. |
+| 26h | `tui/widgets.py` | 540 | **Tier 3.** Every widget the screen is built from. The prompt box is the interesting one — see why `compact=True` was load-bearing. |
+| 26i | `tui/banner.py` | 272 | The wordmark, the mascot, the startup facts, the compact header. Read why the splash shrinks rather than staying. |
+| 26j | `tui/themes/__init__.py` | 267 | Nine colours, four roles, loaded from JSON. A `border` of `""` means no rule — which is why rows have no vertical bar. |
+| 26k | `tui/approval.py` | 146 | The gate, on screen. `push_screen_wait` needs a worker; that constraint shaped the caller. |
+| 26l | `tui/login.py` | 146 | Asking for a secret without ever showing it, and the provider/method pickers. `password=True` is the whole security surface. |
+| 26m | `tui/config.py` | 54 | Which theme you chose, remembered. |
+| 24c | `env.py` | 86 | Finds `.env` by walking outward from where you are, nearest first. |
+| 24d | `system_prompt.py` | 125 | The standing instructions, and `OMEGA.md`. |
+| 24e | `status.py` | 316 | The working line, with labels that are true rather than generic. |
+| 26n | `auth.py` | 384 | **Where a credential lives**, and the resolution order — `auth.json` → environment → nothing, reversed to follow Pi. Also `LoginRequiredProvider`, the provider that cannot answer and says why. |
+| 26o | `oauth.py` | 519 | Signing in with an account. PKCE, a loopback listener, the exchange, renewal — and the argument about whose client id omega presents. **Read the docstring before the code.** |
+| 26p | `models.py` | 560 | Which models each provider offers and how big their windows are. Three layers: built-ins, a models.dev refresh cache, and your own `models.json` on top. The single source `/model` and the compactor both read. |
+| 26q | `version.py` | 38 | Which build this is. Outside `tui/` on purpose: importing the banner would pull in Textual. |
 | 30 | **`cli.py`** | **386** | **Last.** The composition root: the only interactive entry point that picks a concrete provider. |
 
 ---
