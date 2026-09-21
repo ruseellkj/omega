@@ -90,7 +90,9 @@ def test_a_known_large_window_is_recognised() -> None:
 
 
 def test_usage_renders_as_a_fraction_and_a_percent() -> None:
-    usage = ContextUsage(estimated_tokens=50_000, window=200_000)
+    usage = ContextUsage(
+        system_tokens=20_000, message_tokens=25_000, tool_tokens=5_000, window=200_000
+    )
 
     assert usage.percent == 25
     assert "50,000" in str(usage)
@@ -98,7 +100,12 @@ def test_usage_renders_as_a_fraction_and_a_percent() -> None:
 
 
 def test_a_zero_window_does_not_divide_by_zero() -> None:
-    assert ContextUsage(estimated_tokens=10, window=0).percent == 0
+    assert (
+        ContextUsage(
+            system_tokens=10, message_tokens=0, tool_tokens=0, window=0
+        ).percent
+        == 0
+    )
 
 
 def test_measure_ties_it_together() -> None:

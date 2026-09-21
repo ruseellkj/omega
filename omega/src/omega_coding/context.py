@@ -24,29 +24,23 @@ from dataclasses import dataclass
 
 from omega_agent.tools import Tool
 from omega_agent.types import AgentMessage, AssistantMessage, ToolResultMessage, UserMessage
+from omega_coding import models
 
 #: The classic rule of thumb for English and code. Wrong in both directions for
 #: any given string, close enough over a whole conversation.
 CHARS_PER_TOKEN = 4
 
-#: Used when a model is not in the table below. Deliberately the *smaller*
-#: common window: over-reporting how full you are is safe, under-reporting is not.
-DEFAULT_CONTEXT_WINDOW = 200_000
-
-#: Matched as a prefix, so `claude-opus-5[1m]` and dated variants resolve without
-#: an entry each.
-MODEL_WINDOWS: dict[str, int] = {
-    "claude-opus-5[1m]": 1_000_000,
-    "claude-sonnet-5[1m]": 1_000_000,
-}
+#: Re-exported so callers that only care about accounting keep importing it from
+#: here. The table itself moved to `models.py` when `/model` needed to answer
+#: "what else could I switch to?" — the same facts, asked a second way, and two
+#: copies of a window figure is how a compactor ends up budgeting against a
+#: number the provider disagrees with.
+DEFAULT_CONTEXT_WINDOW = models.DEFAULT_CONTEXT_WINDOW
 
 
 def window_for(model: str) -> int:
     """The context window for a model, or a conservative default."""
-    for prefix, window in MODEL_WINDOWS.items():
-        if model.startswith(prefix):
-            return window
-    return DEFAULT_CONTEXT_WINDOW
+    return models.window_for(model)
 
 
 def estimate_tokens(text: str) -> int:
@@ -71,25 +65,60 @@ def _message_text(message: AgentMessage) -> str:
     return ""
 
 
+def estimate_parts(
+    *, system: str, messages: list[AgentMessage], tools: list[Tool]
+) -> tuple[int, int, int]:
+    """`(system, messages, tools)` — the three things a request is made of.
+
+    **The split was always computed and then thrown away.** The old version of
+    this summed the same three quantities into one `total` and returned it, so
+    "how full am I" could be answered but "full *of what*" could not — which is
+    the question that tells you what to do about it. A large `tools` slice means
+    trim schemas; a large `messages` slice means compact.
+
+    Returned as a tuple rather than three calls so the three numbers cannot be
+    measured against different inputs, which is how a breakdown ends up not
+    adding to its own total.
+    """
+    system_tokens = estimate_tokens(system)
+    message_tokens = sum(estimate_tokens(_message_text(message)) for message in messages)
+    tool_tokens = 0
+    for tool in tools:
+        tool_tokens += estimate_tokens(tool.name)
+        tool_tokens += estimate_tokens(tool.description)
+        tool_tokens += estimate_tokens(json.dumps(tool.parameters))
+    return system_tokens, message_tokens, tool_tokens
+
+
 def estimate_request_tokens(
     *, system: str, messages: list[AgentMessage], tools: list[Tool]
 ) -> int:
     """What the next request will roughly cost, schemas included."""
-    total = estimate_tokens(system)
-    total += sum(estimate_tokens(_message_text(message)) for message in messages)
-    for tool in tools:
-        total += estimate_tokens(tool.name)
-        total += estimate_tokens(tool.description)
-        total += estimate_tokens(json.dumps(tool.parameters))
-    return total
+    return sum(estimate_parts(system=system, messages=messages, tools=tools))
 
 
 @dataclass(frozen=True, slots=True)
 class ContextUsage:
-    """A reading, ready to render."""
+    """A reading, ready to render.
 
-    estimated_tokens: int
+    **`estimated_tokens` is a property, not a field, and that is the point.**
+    Holding the total alongside its three parts means holding the same fact
+    twice, and two copies of a number is how a breakdown comes to disagree with
+    the total printed directly above it. Here the total is *defined* as the sum,
+    so they cannot drift.
+    """
+
+    system_tokens: int
+    message_tokens: int
+    tool_tokens: int
     window: int
+    #: Whether `window` came from a catalog entry or from the fallback. Carried
+    #: because the two render identically otherwise - see `parts()`.
+    window_is_known: bool = True
+
+    @property
+    def estimated_tokens(self) -> int:
+        return self.system_tokens + self.message_tokens + self.tool_tokens
 
     @property
     def fraction(self) -> float:
@@ -101,6 +130,44 @@ class ContextUsage:
     def percent(self) -> int:
         return int(self.fraction * 100)
 
+    def parts(self) -> list[str]:
+        """The breakdown, one line each, widest slice first.
+
+        Ordered by size rather than by name because the reason to read this is
+        to find out what to trim, and the answer is whatever is at the top.
+
+        **A zero slice is still printed.** `tools: 0` is information - it says
+        the estimate is not quietly missing the schemas, which is the one
+        direction this estimator must never under-report in
+        (see the module docstring).
+        """
+        rows = [
+            ("messages", self.message_tokens),
+            ("tools", self.tool_tokens),
+            ("system", self.system_tokens),
+        ]
+        rows.sort(key=lambda row: row[1], reverse=True)
+        width = max(len(name) for name, _ in rows)
+        lines = [f"{name:<{width}}  {count:>9,}" for name, count in rows]
+        free = self.window - self.estimated_tokens
+        lines.append(f"{'free':<{width}}  {free:>9,}")
+        return lines
+
+    def window_note(self) -> str | None:
+        """Why the window is what it is, when that needs saying.
+
+        `None` for a window omega has an entry for - there is nothing to
+        explain. A sentence when it is the fallback, because `~0/200,000` reads
+        exactly the same whether that figure is the provider's or omega's
+        stand-in, and the reader has no way to tell which they are looking at.
+        """
+        if self.window_is_known:
+            return None
+        return (
+            "The window is a fallback, not this model's real figure - omega has"
+            " no entry for it. Put the number in ~/.omega/models.json to fix it."
+        )
+
     def __str__(self) -> str:
         return f"~{self.estimated_tokens:,}/{self.window:,} tokens ({self.percent}%)"
 
@@ -108,9 +175,13 @@ class ContextUsage:
 def measure(
     *, model: str, system: str, messages: list[AgentMessage], tools: list[Tool]
 ) -> ContextUsage:
+    system_tokens, message_tokens, tool_tokens = estimate_parts(
+        system=system, messages=messages, tools=tools
+    )
     return ContextUsage(
-        estimated_tokens=estimate_request_tokens(
-            system=system, messages=messages, tools=tools
-        ),
+        system_tokens=system_tokens,
+        message_tokens=message_tokens,
+        tool_tokens=tool_tokens,
         window=window_for(model),
+        window_is_known=not models.window_is_guess(model),
     )

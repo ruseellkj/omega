@@ -433,11 +433,12 @@ wheels = [
 ]
 
 [[package]]
-name = "omega"
+name = "omega-coding"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
+    { name = "httpx" },
     { name = "openai" },
     { name = "pydantic" },
     { name = "python-dotenv" },
@@ -455,6 +456,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=0.120.2" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "openai", specifier = ">=3.3.1" },
     { name = "pydantic", specifier = ">=2.11" },
     { name = "python-dotenv", specifier = ">=1.2.2" },

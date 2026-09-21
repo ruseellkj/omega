@@ -29,7 +29,12 @@ CODING = SRC / "omega_coding"
 
 #: The concrete adapters. Naming one of these is a decision about *which* vendor,
 #: which only a composition root is allowed to make.
-CONCRETE_ADAPTERS = {"omega_ai.anthropic", "omega_ai.openai", "omega_ai.fake"}
+CONCRETE_ADAPTERS = {
+    "omega_ai.anthropic",
+    "omega_ai.openai",
+    "omega_ai.openai_codex",
+    "omega_ai.fake",
+}
 
 #: Files that are allowed to make that decision, because building a runnable
 #: agent out of parts is precisely their job.

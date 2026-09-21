@@ -15,11 +15,15 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import getpass
+import importlib.util
+import io
 import os
 import signal
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, Literal, TextIO
 
 from omega_agent.agent_events import AgentEvent
 from omega_agent.harness import Harness
@@ -32,6 +36,7 @@ from omega_ai.anthropic import AnthropicProvider
 from omega_ai.fake import FakeProvider, text_turn, tool_turn
 from omega_ai.openai import DEFAULT_MODEL as OPENAI_MODEL
 from omega_ai.openai import OpenAIProvider
+from omega_coding import auth, models, oauth
 from omega_coding.approval import Answer, ApprovalPolicy, ApprovalRequest
 from omega_coding.builtin_tools import build_tools
 from omega_coding.commands import CommandContext, dispatch
@@ -42,11 +47,11 @@ from omega_coding.env import USER_CONFIG, find_env_files, load_environment
 from omega_coding.eventlog import EventLog, sweep_old_logs
 from omega_coding.history import drop_empty_failed_turns
 from omega_coding.redact import redact_message, redacting_hook
-from omega_coding.status import StatusLine
+from omega_coding.status import StatusLine, describe
 from omega_coding.subagent import build_subagent_tool
 from omega_coding.system_prompt import PROJECT_INSTRUCTIONS_FILE, build_system_prompt
 from omega_coding.truncate import sweep_old_spills
-from omega_coding.tui import run_tui
+from omega_coding.version import omega_version
 
 _ARG_PREVIEW = 80
 _RESULT_PREVIEW = 100
@@ -92,6 +97,104 @@ def _fake_provider() -> FakeProvider:
 
 def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
+#: How omega presents itself. Three surfaces over the same harness — the choice
+#: changes nothing below `cli.py`.
+Mode = Literal["tui", "repl", "print"]
+
+
+def textual_is_available() -> bool:
+    """Whether the terminal UI can be imported at all.
+
+    `find_spec` rather than a `try: import`, because this runs on every startup
+    and importing Textual costs ~160ms — the whole reason the real import is
+    deferred. Looking for the module is microseconds.
+    """
+    return importlib.util.find_spec("textual") is not None
+
+
+def choose_mode(
+    *,
+    print_prompt: str | None,
+    repl: bool,
+    stdin_tty: bool,
+    stdout_tty: bool,
+    textual_available: bool = True,
+) -> Mode:
+    """Which surface to run, decided from the flags and the terminal.
+
+    **The tty check is not a nicety.** Textual takes over the screen, reads raw
+    keys and writes escape sequences; pointed at a pipe it produces control
+    codes where output was expected, and reads EOF where a keystroke was. So a
+    non-interactive stream falls back to the REPL rather than failing oddly
+    later. `omega < script.txt` and `omega | tee log` both keep working.
+
+    `--tui` is deliberately not a parameter. It was the only way in before the
+    UI became the default, and it now asks for what already happens — keeping it
+    as a no-op alias means every command line anyone has written still runs.
+    """
+    if print_prompt is not None:
+        return "print"
+    if repl:
+        return "repl"
+    if not (stdin_tty and stdout_tty):
+        return "repl"
+    if not textual_available:
+        # **Decided here, not at the import.** The first version caught the
+        # `ModuleNotFoundError` down where `run_tui` is imported — which works,
+        # but by then the banner has already printed "Ctrl+Q quits", and the
+        # thing it is about to start has no Ctrl+Q. A mode that can still change
+        # after the screen has been described to the user is not a mode.
+        return "repl"
+    return "tui"
+
+
+async def _run_print(harness: Harness, prompt: str) -> int:
+    """One prompt, answer on stdout, everything else on stderr.
+
+    **The split is what makes this pipeable.** `omega -p "..." > answer.txt`
+    should contain the answer and not a progress log, so tool activity goes to
+    stderr where a redirect leaves it alone. This is the same division the status
+    line already makes for the REPL (`status.py` writes to stderr, and only when
+    it is looking at a terminal).
+
+    Returns a process exit code rather than printing one, because a script
+    running omega in a pipeline checks `$?` and not the wording of a message.
+    """
+    interrupt = _install_interrupt_handler(harness)
+    reason = "error"
+    wrote = False
+
+    try:
+        async for event in harness.run(prompt):
+            if event.type == "message_update":
+                raw = event.stream_event
+                if raw.type == "text_delta":
+                    sys.stdout.write(raw.delta)
+                    sys.stdout.flush()
+                    wrote = True
+            elif event.type == "message_end":
+                # A turn that called a tool speaks twice, and without this the
+                # two answers are concatenated into one run-on line. Closing on
+                # `message_end` rather than after each delta means a single
+                # answer still arrives as one paragraph.
+                if wrote:
+                    sys.stdout.write("\n")
+                    wrote = False
+            elif event.type == "tool_execution_start":
+                print(f"  {describe(event.tool_call)}", file=sys.stderr)
+            elif event.type == "agent_end":
+                reason = event.reason
+                if event.error_message:
+                    print(f"  {event.reason}: {event.error_message}", file=sys.stderr)
+    finally:
+        interrupt()
+
+    if wrote:
+        sys.stdout.write("\n")
+    sys.stdout.flush()
+    return 0 if reason == "stop" else 1
 
 
 async def _run_turn(harness: Harness, prompt: str) -> None:
@@ -141,6 +244,23 @@ def _install_interrupt_handler(harness: Harness) -> Callable[[], None]:
         loop.remove_signal_handler(signal.SIGINT)
 
     return restore
+
+
+async def _ask_secret_in_terminal(prompt: str) -> str | None:
+    """Read a secret from the terminal without echoing it.
+
+    `getpass` rather than `input`, so the key never reaches the screen or the
+    shell's scrollback. On a thread for the same reason `_ask_in_terminal` is:
+    it blocks, and the event loop has a turn to run.
+
+    EOF or an empty line is a cancel — the rule the approval prompt already
+    follows, that the easiest answer is the one that changes nothing.
+    """
+    try:
+        secret = await asyncio.to_thread(getpass.getpass, f"  {prompt}: ")
+    except (EOFError, KeyboardInterrupt):
+        return None
+    return secret.strip() or None
 
 
 async def _ask_in_terminal(request: ApprovalRequest) -> Answer:
@@ -261,8 +381,7 @@ def main() -> None:
         action="store_true",
         help=(
             "Run the terminal UI instead of the print REPL. Lets you type while a "
-            "turn is running to steer it. Requires --yes: approval prompts have no "
-            "modal yet."
+            "turn is running to steer it."
         ),
     )
     parser.add_argument(
@@ -278,10 +397,11 @@ def main() -> None:
     parser.add_argument(
         "--provider",
         choices=["anthropic", "openai"],
-        default="anthropic",
+        default=None,
         help=(
-            "Which wire format to speak. `openai` also reaches Groq, Together, "
-            "Ollama and vLLM - see --base-url."
+            "Force a provider. Normally unnecessary: omega uses whichever one you "
+            "are signed in to. `openai` also reaches Groq, Together, Ollama and "
+            "vLLM - see --base-url."
         ),
     )
     parser.add_argument(
@@ -298,7 +418,101 @@ def main() -> None:
     parser.add_argument(
         "--max-turns", type=int, default=DEFAULT_MAX_TURNS, help="Loop iteration cap."
     )
+    parser.add_argument(
+        "--repl",
+        action="store_true",
+        help=(
+            "Use the plain print/input REPL instead of the terminal UI. The fallback "
+            "when a terminal cannot run Textual, and what omega did by default before "
+            "the UI became the default."
+        ),
+    )
+    parser.add_argument(
+        "-p",
+        "--print",
+        dest="print_prompt",
+        metavar="PROMPT",
+        nargs="?",
+        const="-",
+        help=(
+            "Run one prompt to completion, print the answer to stdout and exit. "
+            "Reads the prompt from stdin when given no argument, so it pipes. "
+            "Tool activity goes to stderr, so redirecting stdout captures the answer "
+            "and nothing else."
+        ),
+    )
+    parser.add_argument(
+        "--context-window",
+        type=int,
+        default=None,
+        metavar="TOKENS",
+        help=(
+            "Override the model's context window for compaction. Defaults to the "
+            "model table: 200,000, or 1,000,000 for a [1m] model."
+        ),
+    )
+    parser.add_argument(
+        "--compact-threshold",
+        type=float,
+        default=None,
+        metavar="FRACTION",
+        help=(
+            "Fraction of the window to compact down to, between 0 and 1. Defaults to "
+            "0.8. Compaction rewrites the request when the estimate crosses it."
+        ),
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"omega {omega_version()}",
+        help="Print the version and exit.",
+    )
     args = parser.parse_args()
+
+    if args.compact_threshold is not None and not 0 < args.compact_threshold <= 1:
+        parser.error("--compact-threshold must be greater than 0 and at most 1.")
+
+    have_textual = textual_is_available()
+    chooser = {
+        "print_prompt": args.print_prompt,
+        "repl": args.repl,
+        "stdin_tty": sys.stdin.isatty(),
+        "stdout_tty": sys.stdout.isatty(),
+    }
+    mode = choose_mode(**chooser, textual_available=have_textual)
+
+    if not have_textual and choose_mode(**chooser, textual_available=True) == "tui":
+        # A stale install produces exactly this: `textual` became a dependency at
+        # Tier 3, and an `omega` installed before that keeps running the current
+        # source against its old environment. Said before the banner, so the two
+        # cannot contradict each other.
+        print(
+            "The terminal UI needs 'textual', which is not installed here.\n"
+            "Falling back to the print REPL. To get the UI back:\n"
+            "    uv tool install --reinstall --editable <path-to>/omega\n"
+            "or run it from the project with `uv run omega`.\n"
+            "Pass --repl to choose this deliberately and skip this notice.\n",
+            file=sys.stderr,
+        )
+
+    #: Where the orientation text goes, and it differs per surface.
+    #:
+    #: **print** — stdout belongs to the answer and nothing else may touch it.
+    #: `omega -p "..." > out.txt` that captures a banner is not pipeable, which
+    #: was the whole point of the flag. Found by running it, not by reading it:
+    #: the first `-p` redirect collected seven lines of banner above the answer.
+    #:
+    #: **tui** — discarded. The splash shows the model, the path, the approval
+    #: mode and more, so printing the same facts first only means finding them
+    #: again in the scrollback after quitting. Textual switches to the alternate
+    #: screen immediately, so they were never visible during the session anyway.
+    banner: TextIO
+    if mode == "print":
+        banner = sys.stderr
+    elif mode == "tui":
+        banner = io.StringIO()
+    else:
+        banner = sys.stdout
 
     # Choosing a provider is the *only* thing in this file that knows two of them
     # exist. Everything below - the harness, the hooks, the tools, the renderer -
@@ -309,53 +523,140 @@ def main() -> None:
     # source tree lives, and should not need to.
     env_files = load_environment()
 
-    provider: ModelProvider
-    model = args.model
-    if args.fake:
-        provider = _fake_provider()
-        model = model or "fake-model"
-        print("omega (fake provider - scripted responses, nothing is sent anywhere)")
-    elif args.provider == "openai":
-        base_url = args.base_url or os.environ.get("OPENAI_BASE_URL")
-        if not os.environ.get("OPENAI_API_KEY") and not base_url:
-            sys.exit(
-                _missing_key_message(
-                    "OPENAI_API_KEY",
-                    extra=(
-                        "Or pass --base-url to reach a local server (Ollama, vLLM) "
-                        "that needs no key."
-                    ),
-                )
-            )
-        provider = OpenAIProvider(base_url=base_url)
-        model = model or OPENAI_MODEL
-        print(f"omega ({model} via openai{f' at {base_url}' if base_url else ''})")
-    else:
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            sys.exit(_missing_key_message("ANTHROPIC_API_KEY"))
-        provider = AnthropicProvider()
-        model = model or ANTHROPIC_MODEL
-        print(f"omega ({model})")
+    base_url = args.base_url or os.environ.get("OPENAI_BASE_URL")
 
-    print("Type 'exit' to quit.\n")
+    def build_provider() -> tuple[ModelProvider, str, str | None]:
+        """The provider, its default model, and which provider that was.
+
+        **A closure rather than inline code**, because `/login` has to be able to
+        run it again mid-session: the harness is holding a `LoginRequiredProvider`
+        at that point and needs the real one without a restart. Keeping it here
+        also keeps the two-file rule — this is still the only place besides
+        `evals.py` that names a concrete provider.
+
+        `auth.choose_provider` decides *which*, and it is re-asked on every call
+        rather than captured once: after `/login openai` the answer changes, and
+        a value read at startup would still say "signed in to nothing".
+        """
+        if args.fake:
+            return _fake_provider(), "fake-model", None
+
+        chosen = auth.choose_provider(args.provider, base_url=base_url)
+
+        # **The key is passed, not merely checked.** Both adapters fall back to
+        # `os.environ` when `api_key` is None (`anthropic.py:335`,
+        # `openai.py:270`), so an earlier version that only *tested*
+        # `auth.resolve(...)` and then constructed `AnthropicProvider()` opened
+        # the gate for a key the provider never received — `/login` stored it,
+        # the startup facts said "signed in", and the first request failed with
+        # an authentication error. Measured: `_client.api_key` was None.
+        if chosen == "openai":
+            # A `--base-url` server (Ollama, vLLM) needs no key, so the gate does
+            # not apply to it — but a key still wins if there is one.
+            key = auth.resolve("openai")
+            if base_url or key:
+                return OpenAIProvider(api_key=key, base_url=base_url), OPENAI_MODEL, "openai"
+            return auth.LoginRequiredProvider("openai"), OPENAI_MODEL, "openai"
+        if chosen == "openai-codex":
+            # No `api_key=` fallback here, deliberately: there is no environment
+            # variable that authenticates a ChatGPT subscription, so a missing
+            # credential is always "not signed in" rather than "try the ambient
+            # one". The account id is stored beside the token at sign-in.
+            # Imported here, not at module scope: this adapter is the only one
+            # that reaches for `httpx` directly, and a startup-time import turns
+            # a missing HTTP library into "omega will not open" instead of
+            # "Codex is unavailable". Everything else still works without it.
+            from omega_ai.openai_codex import CodexProvider
+
+            account = auth.account_id("openai-codex")
+            if auth.resolve("openai-codex") and account:
+                return (
+                    CodexProvider(
+                        auth=lambda: oauth.access_token("openai-codex"),
+                        account_id=account,
+                    ),
+                    models.DEFAULTS["openai-codex"],
+                    "openai-codex",
+                )
+            codex_model = models.DEFAULTS["openai-codex"]
+            return auth.LoginRequiredProvider("openai-codex"), codex_model, "openai-codex"
+        if chosen == "anthropic":
+            key = auth.resolve("anthropic")
+            if key:
+                # **The resolver, not just the key.** `api_key=` is still passed
+                # so a construction-time failure is visible, but `auth=` is what
+                # the adapter actually calls — once per request and once per
+                # retry — and it is where an expiring subscription token gets
+                # renewed. A static string cannot do that, and a session longer
+                # than the token would die mid-task with no way to recover.
+                return (
+                    AnthropicProvider(
+                        api_key=key,
+                        auth=lambda: oauth.access_token("anthropic"),
+                    ),
+                    ANTHROPIC_MODEL,
+                    "anthropic",
+                )
+            return auth.LoginRequiredProvider("anthropic"), ANTHROPIC_MODEL, "anthropic"
+
+        # Signed in to nothing. The model name is still needed for the facts
+        # block, so the Anthropic default stands in as a label — it is never
+        # sent anywhere, because the provider cannot send.
+        return auth.LoginRequiredProvider(None), ANTHROPIC_MODEL, None
+
+    provider, default_model, chosen_provider = build_provider()
+    model = args.model or default_model
+
+    if args.fake:
+        print("omega (fake provider - scripted responses, nothing is sent anywhere)", file=banner)
+    elif chosen_provider is None:
+        print("omega (not signed in - run /login)", file=banner)
+    elif chosen_provider == "openai":
+        print(f"omega ({model} via openai{f' at {base_url}' if base_url else ''})", file=banner)
+    else:
+        print(f"omega ({model})", file=banner)
+
+    # **Print mode still refuses.** A script piping into omega must not receive a
+    # friendly "run /login" on stdout and an exit code of 0 — there is nobody
+    # there to run it, and a pipeline that silently produced an instruction
+    # instead of an answer is worse than one that failed.
+    if mode == "print" and isinstance(provider, auth.LoginRequiredProvider):
+        sys.exit(
+            _missing_key_message(
+                auth.ENV_VARS[chosen_provider]
+                if chosen_provider in auth.ENV_VARS
+                else " or ".join(auth.ENV_VARS.values())
+            )
+        )
+
+    # Each surface quits differently, and printing the REPL's answer under the
+    # TUI is how someone ends up stuck in an app telling them to type `exit`.
+    quit_hint = {
+        "tui": "Ctrl+Q quits. Ctrl+C stops the current turn.",
+        "repl": "Type 'exit' to quit.",
+        "print": "",
+    }[mode]
+    if quit_hint:
+        print(f"{quit_hint}\n", file=banner)
 
     root = Path.cwd()
-    print(f"Working directory: {root}")
+    print(f"Working directory: {root}", file=banner)
     if args.confine:
-        print("Paths outside it are refused outright (--confine).")
+        print("Paths outside it are refused outright (--confine).", file=banner)
     else:
-        print("Paths outside it need your approval, reads included.")
+        print("Paths outside it need your approval, reads included.", file=banner)
     if args.yes:
         # Said plainly, because --yes now means more than it used to. With no
         # fence on the file tools, this is unprompted read and write access to
         # the whole disk - the refuse-outright list is all that is left.
         print(
             "Tool calls are approved automatically (--yes): no prompts, anywhere on "
-            "this machine. Only the refuse-outright list still applies."
+            "this machine. Only the refuse-outright list still applies.",
+            file=banner,
         )
 
     for path in env_files:
-        print(f"Loaded environment from {path}")
+        print(f"Loaded environment from {path}", file=banner)
 
     # Old truncation spill files, from this run or any other. Swept at startup
     # rather than at exit, because the run that leaves them is the one that
@@ -372,17 +673,26 @@ def main() -> None:
     # One instance, two callers: the automatic pass below and `/compact`. Two
     # compactors could disagree about the budget, which is the kind of drift that
     # only shows up as "why did it compact at a different point that time".
-    compactor = Compactor(model=model, system=system, tools=tools)
+    compactor_options: dict[str, Any] = {}
+    if args.context_window is not None:
+        compactor_options["window"] = args.context_window
+    if args.compact_threshold is not None:
+        compactor_options["threshold"] = args.compact_threshold
+    compactor = Compactor(model=model, system=system, tools=tools, **compactor_options)
 
     # Policy arrives as hooks, so the loop knows nothing about approvals or
     # secrets. Swapping either is a change to this composition, nothing else.
+    # Named rather than inlined, because the TUI needs a reference to hand it a
+    # screen-based asker once a screen exists. See `ApprovalPolicy.use_asker`.
+    policy = ApprovalPolicy(
+        root,
+        asker=None if args.yes else _ask_in_terminal,
+        auto_approve=args.yes,
+        confine=args.confine,
+    )
+
     hooks = AgentHooks(
-        before_tool_call=ApprovalPolicy(
-            root,
-            asker=None if args.yes else _ask_in_terminal,
-            auto_approve=args.yes,
-            confine=args.confine,
-        ),
+        before_tool_call=policy,
         after_tool_call=redacting_hook,
         # The same masking, at the point it actually belongs. `after_tool_call`
         # only ever saw tool output; this sees every message, so a key in the
@@ -466,34 +776,124 @@ def main() -> None:
             restored = harness.resume(session_id)
             print(f"Resumed {session_id} ({restored} messages).")
 
-    if args.tui:
-        # Said rather than discovered. `_ask_in_terminal` blocks on `input()` in a
-        # thread, which cannot work under Textual - without --yes the first tool
-        # call would wait forever on a prompt nobody can see. An approval modal is
-        # the first thing to add here.
+    if mode == "print":
+        # `-p` with no argument means "the prompt is on stdin", which is what
+        # makes `echo "..." | omega -p` work. Reading it here rather than in
+        # `_run_print` keeps that decision next to the flag that caused it.
+        prompt = sys.stdin.read().strip() if args.print_prompt == "-" else args.print_prompt
+        if not prompt:
+            print("-p was given an empty prompt; nothing to do.", file=sys.stderr)
+            raise SystemExit(2)
+        # Approvals in print mode have nobody to ask: `_ask_in_terminal` reads
+        # EOF and declines, which is the right answer for an unattended run. Say
+        # so up front rather than letting the model discover it one denial at a
+        # time.
         if not args.yes:
             print(
-                "--tui needs --yes for now: approval prompts have no modal yet, and "
-                "a prompt you cannot see is a hang.",
+                "note: running without --yes, so tools that change anything will be "
+                "declined - there is no one to ask.",
                 file=sys.stderr,
             )
-            raise SystemExit(2)
-        asyncio.run(run_tui(harness))
-        return
+        raise SystemExit(asyncio.run(_run_print(harness, prompt)))
+
+    # Built once for both surfaces. The TUI needs it so `/` commands work there
+    # too — they were REPL-only, and not for any reason that survived looking at.
+    def reload_provider() -> bool:
+        """Swap in a real provider after `/login`. True if it can now answer.
+
+        The harness holds whatever `build_provider` returned at startup — a
+        `LoginRequiredProvider` when there were no credentials. Rebuilding and
+        assigning is what lets `/login` take effect in the session you are
+        already in, rather than telling you to restart.
+        """
+        replacement, _, _ = build_provider()
+        harness.provider = replacement
+        return not isinstance(replacement, auth.LoginRequiredProvider)
+
+    def switch_model(name: str) -> None:
+        """Move every copy of the model at once.
+
+        Two live copies exist and they are not interchangeable: `harness.model`
+        is what reaches the provider, and `compactor.window` is what compaction
+        budgets against. A switch that moves one is a switch that
+        half-happened — and the window is the half whose failure lands on the
+        *next* request, looking unrelated to the `/model` that caused it.
+
+        There is deliberately **no third copy**. `CommandContext` is frozen, so
+        anything reading `context.model` after a switch would be reading the
+        startup value; `/model` reads `context.harness.model` instead, which is
+        the one the provider actually sees.
+
+        An explicit `--context-window` still wins, because someone who pinned a
+        smaller window than the model's meant it.
+        """
+        harness.model = name
+        if compactor is not None and args.context_window is None:
+            compactor.window = models.window_for(name)
+
+    command_context = CommandContext(
+        harness=harness,
+        store=store,
+        tracker=tracker,
+        model=model,
+        system=system,
+        tools=tools,
+        hooks=hooks,
+        compactor=compactor,
+        # The REPL's asker. The TUI replaces this with its own on mount, the
+        # same way the approval gate gets a screen-based one.
+        ask_secret=_ask_secret_in_terminal,
+        reload_provider=reload_provider,
+        provider=chosen_provider or "",
+        set_model=switch_model,
+    )
+
+    if mode == "tui":
+        # Imported here, not at module scope, for two reasons. Textual costs
+        # ~160ms of a ~920ms startup and `-p` in a script pays it for a UI it
+        # will never draw (measured with `python -X importtime`). And an import
+        # that can fail belongs where the failure can be answered — which is
+        # here, not at the top of a module nobody chose to load.
+        try:
+            from omega_coding.tui import run_tui
+        except ImportError as broken:
+            # `find_spec` above already answered "is Textual installed". This
+            # catches what it cannot: installed but unusable — a half-written
+            # package, a missing transitive dependency, a version whose API moved.
+            # Exiting rather than falling back, because the banner has by now
+            # promised a UI, and a broken install is worth fixing rather than
+            # working around.
+            raise SystemExit(
+                f"The terminal UI failed to load: {broken}\n"
+                "Run with --repl to use omega while you sort it out."
+            ) from broken
+        else:
+            # `--yes` used to be mandatory here: `_ask_in_terminal` blocks on
+            # `input()` in a thread, which Textual paints over, so the first tool
+            # call hung on a prompt nobody could see. `tui/approval.py` replaced
+            # that with a screen, and the policy takes it on mount — so the gate
+            # now works unattended and `--yes` is back to an ordinary opt-out.
+            asyncio.run(
+                run_tui(
+                    harness,
+                    policy=None if args.yes else policy,
+                    context=command_context,
+                    # For the startup facts. `cli.py` is one of the only two
+                    # files allowed to know a provider's name, so it tells the
+                    # screen rather than the screen asking.
+                    provider_name=(
+                        "fake" if args.fake else (chosen_provider or "none")
+                    ),
+                    auto_approve=args.yes,
+                    confine=args.confine,
+                )
+            )
+            return
 
     asyncio.run(
         _repl(
             harness=harness,
-            context=CommandContext(
-                harness=harness,
-                store=store,
-                tracker=tracker,
-                model=model,
-                system=system,
-                tools=tools,
-                hooks=hooks,
-                compactor=compactor,
-            ),
+            context=command_context,
             model=model,
             system=system,
         )
@@ -577,8 +977,15 @@ async def _converse(
         # The two instruments. Neither fixes anything - they make failures #1
         # and #9 visible before they bite, which is what Tier 3 needs in order
         # to know where to put a threshold.
+        # `harness.model`, not the local `model`: /model moves the harness and
+        # the compactor, and this line is printed after every turn. The local
+        # name still holds the startup value, so using it would report the
+        # launch model's window for the rest of the session.
         usage = measure(
-            model=model, system=system, messages=harness.messages, tools=context.tools
+            model=harness.model,
+            system=system,
+            messages=harness.messages,
+            tools=context.tools,
         )
         print(f"\n  [{usage} | {context.tracker}]")
         print()
