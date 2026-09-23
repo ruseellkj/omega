@@ -18,7 +18,7 @@ read, so distribution is what forced the credential store.
 |---|---|---|---|---|
 | **distribution** | a name in an index | `omega-coding` | `tau-ai` | `pi-coding-agent` |
 | **command** | a file on your `PATH` | `omega` | `tau` | `pi` |
-| **repository** | where the source lives | `rushil-searce/cli-agent` | huggingface/tau | earendil-works/pi |
+| **repository** | where the source lives | `ruseellkj/omega` | huggingface/tau | earendil-works/pi |
 
 `omega` the command has nothing to do with `omega` the PyPI name — which is why
 it is fine that the latter belongs to someone else's games library.
@@ -139,7 +139,7 @@ name.
 **No, and the installer proves it** — it installs from git today:
 
 ```sh
-OMEGA_SOURCE="${OMEGA_SOURCE:-git+https://github.com/rushil-searce/cli-agent#subdirectory=omega}"
+OMEGA_SOURCE="${OMEGA_SOURCE:-git+https://github.com/ruseellkj/omega#subdirectory=omega}"
 ```
 
 | | git install | PyPI install |
@@ -224,7 +224,7 @@ workflow can print it.
 
 **Trusted Publishing** inverts it. PyPI is told once, through its web UI:
 
-> the repository `rushil-searce/cli-agent`, workflow `publish.yml`, environment
+> the repository `ruseellkj/omega`, workflow `publish.yml`, environment
 > `pypi`, may publish `omega-coding`
 
 At publish time GitHub mints a short-lived signed statement — *"this job really is

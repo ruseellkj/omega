@@ -26,7 +26,7 @@ export const site = {
    */
   definition:
     "is a Python coding agent small enough to read end to end. It asks a model for help, runs what it asks for, reports back, and repeats — until it says it is finished.",
-  repo: "https://github.com/rushil-searce/cli-agent",
+  repo: "https://github.com/ruseellkj/omega",
   x: "https://x.com/rushil_jariwala",
 } as const;
 

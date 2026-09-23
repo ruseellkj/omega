@@ -30,7 +30,7 @@ UV_INSTALLER_URL="https://astral.sh/uv/install.sh"
 #     OMEGA_SOURCE="omega-coding"
 #
 # Override for a fork or a branch:  OMEGA_SOURCE=... sh install.sh
-OMEGA_SOURCE="${OMEGA_SOURCE:-git+https://github.com/rushil-searce/cli-agent#subdirectory=omega}"
+OMEGA_SOURCE="${OMEGA_SOURCE:-git+https://github.com/ruseellkj/omega#subdirectory=omega}"
 
 find_uv() {
     if command -v uv >/dev/null 2>&1; then

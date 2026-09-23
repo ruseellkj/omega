@@ -60,7 +60,7 @@ Two things learned in the doing, neither of them in the plan:
   script would pay for a string.
 
 What is still outstanding here: **claiming `omega-coding` on PyPI**, and the one-time Trusted
-Publishing setup on PyPI's side (repository `rushil-searce/cli-agent`, workflow `publish.yml`,
+Publishing setup on PyPI's side (repository `ruseellkj/omega`, workflow `publish.yml`,
 environment `pypi`). Until then `install.sh` installs from git, which works and is tested.
 
 Self-update and version *checking* — Tau's `updater.py` (387) and `update_check.py` (379) — remain

@@ -7,7 +7,7 @@
 #
 # `id-token: write` plus the `pypi` environment is PyPI Trusted Publishing — no
 # API token in repository secrets. It needs a one-time setup on PyPI: add
-# `rushil-searce/cli-agent`, workflow `publish.yml`, environment `pypi`.
+# `ruseellkj/omega`, workflow `publish.yml`, environment `pypi`.
 #
 # omega lives in a subdirectory, so every step runs from `omega/`. GitHub only
 # reads `.github/workflows` at the repository root, which is why this file is
