@@ -6,7 +6,7 @@ Named after a physics letter, following [Pi](https://github.com/earendil-works/p
 [Tau](https://github.com/huggingface/tau) — the two MIT-licensed agents this is studied from.
 Written independently, not forked.
 
-**Currently at Tier 3 — "it survives a long task, and has a face."** 14,220 lines of source,
+**Currently at Tier 3 — "it survives a long task, and has a face."** 14,226 lines of source,
 713 tests, all offline.
 
 * **[`READING-ORDER.md`](READING-ORDER.md) — start here.** All 52 files in the order to read them,

@@ -10,7 +10,7 @@ shipping — he reads every line himself.
 
 | Directory | What it is |
 |---|---|
-| `omega/` | **the agent.** Three packages, 14,220 lines of `src/`, 713 tests. Tier 3 complete. |
+| `omega/` | **the agent.** Three packages, 14,226 lines of `src/`, 713 tests. Tier 3 complete. |
 | `dev-notes/` | the study notes — teardowns of the references, architecture decisions, concepts |
 | `research/pi/` | **reference 1**: Pi (TypeScript), `github.com/earendil-works/pi` |
 | `research/tau/` | **reference 2**: Tau (Python), `github.com/huggingface/tau` — a port of Pi |

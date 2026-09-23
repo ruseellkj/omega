@@ -97,7 +97,7 @@ neither imports it.
 | 26o | `oauth.py` | 519 | Signing in with an account. PKCE, a loopback listener, the exchange, renewal — and the argument about whose client id omega presents. **Read the docstring before the code.** |
 | 26p | `models.py` | 560 | Which models each provider offers and how big their windows are. Three layers: built-ins, a models.dev refresh cache, and your own `models.json` on top. The single source `/model` and the compactor both read. |
 | 26q | `version.py` | 38 | Which build this is. Outside `tui/` on purpose: importing the banner would pull in Textual. |
-| 30 | **`cli.py`** | **995** | **Last.** The composition root: the only interactive entry point that picks a concrete provider. |
+| 30 | **`cli.py`** | **1,001** | **Last.** The composition root: the only interactive entry point that picks a concrete provider. |
 
 ---
 
