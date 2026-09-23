@@ -293,7 +293,11 @@ export default function DocsPage() {
                 environment, and never edits a shell rc file.
               </p>
             </div>
-            <div className="md:col-span-9">
+            {/* `min-w-0` because a grid item will not shrink below its content by
+                default, and the install command is one unbreakable line: without it
+                the column widens past a phone screen instead of letting the <pre>
+                scroll. Same fix as the hero's terminal column. */}
+            <div className="min-w-0 md:col-span-9">
               <pre className="m-0 overflow-x-auto rounded-sm border-2 border-rule-strong bg-term-bg p-4">
                 <code className="font-mono text-sm text-ink">{install}</code>
               </pre>
