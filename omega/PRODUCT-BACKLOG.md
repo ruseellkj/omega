@@ -2,7 +2,7 @@
 
 *Was `TIER-3-PLUS.md`. Renamed because "Tier 3+" described **when** this work was not happening
 rather than **what** it is, and it stopped being true the moment part of it shipped: distribution
-is done, and OAuth is shipped for Anthropic with its cost recorded rather than declined. A backlog can hold a finished row and a
+is done, and OAuth is shipped for Anthropic and for ChatGPT (Codex) with its cost recorded rather than declined. A backlog can hold a finished row and a
 refused row; a tier number cannot.*
 
 *"Backlog" rather than "features" on purpose — CI, packaging and trusted publishing are not
@@ -148,8 +148,8 @@ prerequisite**, not a detail. That is a real decision and it has not been made.
 
 | Item | Tau's module | Lines | What omega has today |
 |---|---|---|---|
-| OAuth | `oauth.py` + 5 more | **1,388** | **Anthropic browser sign-in; Codex declined — see below** |
-| Provider catalog | `provider_catalog.py` | 110 | nothing |
+| OAuth | `oauth.py` + 5 more | **1,388** | **Anthropic and ChatGPT (Codex) browser sign-in** |
+| Provider catalog | `provider_catalog.py` | 110 | `models.py` — built-ins, a models.dev refresh, and your `models.json` on top |
 | Provider config | `provider_config.py` | **2,366** | two hardcoded adapters |
 
 The six OAuth modules (`oauth.py`, `oauth_anthropic.py`, `oauth_device.py`,
@@ -184,7 +184,13 @@ The last row is the one worth reading twice — the borrowed registration does n
 screen, it reaches the model on every turn. Anthropic rejects the token without it
 (`anthropic-messages.ts:976` calls it MUST; `provider_runtime.py:83` sets the same string).
 
-**OpenAI is still not offered**, and that is unchanged. The reason is not squeamishness about a
+**Update — OpenAI sign-in shipped after all.** Rushil asked for it, and the cost below was paid
+rather than avoided: `omega_ai/openai_codex.py` is a separate adapter for the ChatGPT subscription
+backend, at **720 lines** against the ~1,050 estimated from Tau's. The argument that follows is the
+one it was reversed against, kept for the same reason finished rows are kept — a plan that
+quietly loses its reasoning stops being checkable.
+
+*What this section said before:* **OpenAI is still not offered**, and that is unchanged. The reason is not squeamishness about a
 second borrowed id — it is that the id opens a different product.
 
 ```
