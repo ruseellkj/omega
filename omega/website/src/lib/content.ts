@@ -102,8 +102,8 @@ export const layers = [
   {
     n: 4,
     name: "Terminal UI",
-    detail: "Print output today. The 10 agent events are already the contract a real TUI would use.",
-    state: "partial",
+    detail: "A Textual UI, now the default. It reads the same 10 agent events the REPL does — none were added for it.",
+    state: "built",
   },
   {
     n: 3,
@@ -127,7 +127,7 @@ export const layers = [
 
 /** TIER-2.md, the comparison table at lines 14-19. */
 export const measured = [
-  { label: "Source lines", tier1: "1,577", tier2: "4,654", today: "14,220" },
+  { label: "Source lines", tier1: "1,577", tier2: "4,654", today: "14,226" },
   { label: "Test lines", tier1: "499", tier2: "4,257", today: "13,308" },
   { label: "Tests", tier1: "45", tier2: "289", today: "713" },
   { label: "loop.py", tier1: "151", tier2: "190", today: "190" },
@@ -247,7 +247,7 @@ export const claims = [
   },
   {
     title: "The loop holds at 190 lines",
-    body: "It hit 249 while the between-turns queues went in. Rather than let it grow, tool dispatch was extracted to its own file. Source has since grown to 14,220 lines and the loop has not moved.",
+    body: "It hit 249 while the between-turns queues went in. Rather than let it grow, tool dispatch was extracted to its own file. Source has since grown to 14,226 lines and the loop has not moved.",
   },
   {
     title: "713 tests, none touching the network",

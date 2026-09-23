@@ -71,7 +71,7 @@ const PARTS = [
   {
     role: "the face",
     symbol: "cli · headless",
-    line: "Two frontends already, because neither can call the loop — both only subscribe to events.",
+    line: "Two entry points: cli hands one harness to the terminal UI, the REPL or -p, and headless drives it from code. None can call the loop — all only subscribe to events.",
   },
 ] as const;
 
@@ -108,7 +108,7 @@ export function BoundarySection() {
             {`   coding-agent environment
 `}
             <span className="text-oxblood">cli · headless</span>
-            {`  two possible frontends
+            {`  two entry points
 
 `}
             <span className="text-ink-muted">dependency direction</span>

@@ -7,7 +7,7 @@ import { install, keys, sessionCommands, site } from "@/lib/content";
 export const metadata: Metadata = {
   title: "Docs — omega",
   description:
-    "Everything omega has at Tier 2, section by section — and an honest list of what it does not.",
+    "Everything omega has, section by section — and an honest list of what it does not.",
 };
 
 const BLOB = `${site.repo}/blob/main`;
@@ -18,7 +18,7 @@ type Item = { name: string; href: string; where?: string; note: string };
 /**
  * Organised the way a documentation site is, rather than as a reading order —
  * but every entry points at something that exists today. Nothing is listed as
- * a placeholder; what Tier 2 lacks is in NOT_YET below instead, which is the
+ * a placeholder; what omega lacks is in NOT_YET below instead, which is the
  * more useful half of the page.
  */
 const SECTIONS: { title: string; lede: string; items: Item[] }[] = [
@@ -108,7 +108,7 @@ const SECTIONS: { title: string; lede: string; items: Item[] }[] = [
         name: "Built-in tools",
         href: `${BLOB}/omega/src/omega_coding/builtin_tools.py`,
         where: "omega_coding/builtin_tools.py",
-        note: "read_file, write_file, edit_file, run_shell. Four, and every one returns its errors as data.",
+        note: "read_file, write_file, edit_file, read_image, list_files, find_files, search_files, run_shell — eight, plus run_subagent, wired in cli.py. Every one returns its errors as data.",
       },
       {
         name: "Folder trees",
@@ -197,7 +197,7 @@ const SECTIONS: { title: string; lede: string; items: Item[] }[] = [
       {
         name: "Roadmap",
         href: "/roadmap",
-        note: "Tier 3, and the two failures it has to close.",
+        note: "All three tiers, and what each one closed.",
       },
       {
         name: "Releases",
@@ -213,46 +213,20 @@ const SECTIONS: { title: string; lede: string; items: Item[] }[] = [
  * not — named so the gap is countable rather than vague.
  */
 const NOT_YET: { name: string; note: string; when: string }[] = [
-  { name: "Compaction", note: "Long tasks still fill the context and stop.", when: "Tier 3" },
   {
-    name: "Prompt caching",
-    note: "Every turn re-sends the whole prefix, and pays for it.",
-    when: "Tier 3",
+    name: "A settings file",
+    note: "Only the theme persists, to ~/.omega/tui.json, and models to ~/.omega/models.json. Nothing else is configurable.",
+    when: "backlog",
+  },
+  { name: "Skills and prompt templates", note: "No reusable prompt library loads at runtime.", when: "backlog" },
+  {
+    name: "Extensions",
+    note: "Nothing loads at runtime. Themes shipped, but as four JSON files, not a plugin point.",
+    when: "backlog",
   },
   {
-    name: "A real TUI",
-    note: "Output is printed. The ten agent events are already the contract one would use.",
-    when: "Tier 3",
-  },
-  {
-    name: "Search tools",
-    note: "No grep, find or ls — the model reads whole files instead.",
-    when: "Tier 3",
-  },
-  {
-    name: "Subagents and plan mode",
-    note: "A subagent would be the headless driver, called from a tool.",
-    when: "Tier 3",
-  },
-  {
-    name: "Image reading",
-    note: "Content blocks are already a discriminated union, so there is somewhere to put it.",
-    when: "Tier 3",
-  },
-  {
-    name: "Config files",
-    note: "No settings file. .env and OMEGA.md are read at startup; neither configures behaviour.",
-    when: "unplanned",
-  },
-  { name: "Skills and prompt templates", note: "No reusable prompt library.", when: "unplanned" },
-  {
-    name: "Keyboard shortcuts beyond Ctrl-C",
-    note: "No history, no autocomplete, no palette — each needs a TUI.",
-    when: "Tier 3",
-  },
-  {
-    name: "Extensions and themes",
-    note: "Neither exists; the renderer is a single file.",
+    name: "Plan mode",
+    note: "Subagents shipped as run_subagent; a read-only planning mode did not.",
     when: "unplanned",
   },
 ];
@@ -292,7 +266,7 @@ export default function DocsPage() {
     <section className={`py-16 md:py-20 ${GUTTER}`}>
       <PageHeader
         eyebrow="docs"
-        title="Everything Tier 2 has."
+        title="Everything omega has."
         lede="The notes live in the repository as Markdown, so they cannot drift from the code. This page is the map — organised by what you would want to do, not by directory."
       >
         <div className="mt-8 flex flex-wrap items-baseline gap-x-8 gap-y-3">
@@ -401,7 +375,8 @@ export default function DocsPage() {
             <div className="md:col-span-3">
               <h2 className="label m-0 text-ink-muted">Not here yet</h2>
               <p className="m-0 mt-2.5 max-w-[28ch] text-sm text-ink-muted">
-                Named so the gap is countable. Half are Tier 3; the rest are not planned at all.
+                Named so the gap is countable. Everything Tier 3 promised shipped; what is left is
+                product work, tracked in the backlog or not planned.
               </p>
             </div>
             <ul className="m-0 grid list-none gap-3 p-0 sm:grid-cols-2 md:col-span-9">

@@ -11,12 +11,12 @@ export const metadata: Metadata = {
 /**
  * Tau's dev-notes are the model: one short note per thing learned, written
  * after it happened, kept honest. Every figure here is measured — the sources
- * are TIER-1.md and TIER-2.md.
+ * are TIER-1.md, TIER-2.md and TIER-3.md.
  */
 const LESSONS = [
   {
-    title: "Every estimate ran low. Three times.",
-    body: "Tier 1 was predicted at ~700 lines and came in at 1,577. Tier 2 predicted 3,400–3,800 and came in at 4,654. The direction never varied, so it stopped being noise and became a correction factor: assume any estimate in these notes is 1.3–2× low.",
+    title: "Three estimates ran low. The fourth did not.",
+    body: "Tier 1 was predicted at ~700 lines and came in at 1,577. Tier 2 predicted 3,400–3,800 and came in at 4,654. The direction never varied, so it stopped being noise and became a correction factor: assume any estimate in these notes is 1.3–2× low. Tier 3 applied it to a naive ~4,000, forecast 9,000–12,000, and came in at 8,699 — the first estimate in the project not to run low. The factor was the useful part, not the guess.",
   },
   {
     title: "The tripwire fired, and it was right.",

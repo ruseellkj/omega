@@ -127,7 +127,7 @@ export default function RoadmapPage() {
 
   return (
     <section className={`py-16 md:py-20 ${GUTTER}`}>
-      <PageHeader eyebrow="roadmap" title="Two tiers closed. One to go.">
+      <PageHeader eyebrow="roadmap" title="Three tiers closed.">
         <div className="mt-8 flex flex-wrap items-baseline gap-x-8 gap-y-3">
           {(["shipped", "next", "planned"] as const).map((k) => (
             <span key={k} className="flex items-baseline gap-2.5">
@@ -142,8 +142,9 @@ export default function RoadmapPage() {
 
         <p className="mt-8 max-w-[56ch] text-lg text-ink-muted">
           Each tier was written as a contract before the code, then corrected in place wherever
-          reality disagreed. The estimates were wrong three times running, and the notes still say
-          so.
+          reality disagreed. The estimates ran low three times running, and the notes still say so
+          — the Tier 3 estimate was the first that did not, landing at 8,699 lines against a 9,000–12,000
+          forecast.
         </p>
       </PageHeader>
 
