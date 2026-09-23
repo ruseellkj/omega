@@ -10,7 +10,7 @@ shipping — he reads every line himself.
 
 | Directory | What it is |
 |---|---|
-| `omega/` | **the agent.** Three packages, 8,699 lines of `src/`, 512 tests. Tier 3 complete. |
+| `omega/` | **the agent.** Three packages, 14,220 lines of `src/`, 713 tests. Tier 3 complete. |
 | `dev-notes/` | the study notes — teardowns of the references, architecture decisions, concepts |
 | `research/pi/` | **reference 1**: Pi (TypeScript), `github.com/earendil-works/pi` |
 | `research/tau/` | **reference 2**: Tau (Python), `github.com/huggingface/tau` — a port of Pi |
@@ -25,14 +25,17 @@ references do this?" — never edit them.
 ```bash
 cd omega
 uv sync                             # install from the lockfile
-uv run pytest -q                    # 512 tests, ~6s, fully offline
+uv run pytest -q                    # 713 tests, ~35s, fully offline
 uv run mypy --strict src            # must be clean
 uv run ruff check .                 # must be clean
 uv run python -m omega_coding.evals # smoke eval, 4/4, no network
-uv run omega --fake --yes           # a full turn against scripted responses
+uv run omega --fake --yes -p "hi"   # one scripted turn, then exit — no key, no network
 ```
 
-Python >=3.14, pinned by `.python-version`. `asyncio_mode = "auto"`, so async tests need no marker.
+Run it with `-p` from a tool call. Without it, omega opens the terminal UI on a TTY, and with
+no TTY it falls back to the REPL and exits at the prompt without running a turn.
+
+Python >=3.14, pinned by the repo-root `.python-version`. `asyncio_mode = "auto"`, so async tests need no marker.
 
 **Every change must leave all four green.** Where there is a bug, this project's convention is a
 red test that names the failure, then the fix.
@@ -61,18 +64,19 @@ it *asks*, through `hooks.py`:
 | Hook | Filled by |
 |---|---|
 | `before_tool_call` | `omega_coding/approval.py` — the approval gate |
-| `after_tool_call` | `omega_coding/redact.py` — credential masking |
+| `after_tool_call` | `omega_coding/redact.py` — credential masking on tool output |
+| `before_record` | `omega_coding/redact.py` — the same masking on every message, before it is stored |
 | `convert_to_llm` | `omega_coding/history.py` — drop empty failed turns |
-| `transform_context` | **empty — compaction goes here at Tier 3** |
+| `transform_context` | `omega_coding/compact.py` — compaction |
 | `get_steering_messages` / `get_follow_up_messages` | queues on the harness |
 
 If a change would grow `loop.py`, it almost certainly belongs behind a hook instead.
 
 ## Reading the code
 
-`omega/READING-ORDER.md` gives all 46 files in dependency order with one line each. Start there,
-not with `ls`. `omega/TIER-1.md` and `omega/TIER-2.md` record what each tier has, what it lacks,
-and where Tier 3 puts it.
+`omega/READING-ORDER.md` gives all 52 files in dependency order with one line each. Start there,
+not with `ls`. `omega/TIER-1.md`, `TIER-2.md` and `TIER-3.md` record what each tier has and lacks;
+`omega/PRODUCT-BACKLOG.md` holds what comes after the tiers.
 
 `dev-notes/` is a reference, not a book — read a section when you reach the file it explains.
 `dev-notes/00-concepts/state-and-delegation.md` compares omega, Pi, Tau and Claude Code on
@@ -86,8 +90,10 @@ ordinary build work rather than during explanations.
 **1 · Never name something that does not exist without saying so.**
 A hook called `before_record` and a tier called "Tier 2.5" were both invented mid-answer and sat
 beside six real hook names and two real tier names. They read as real and cost a round of
-confusion each. Before citing any symbol, flag, file or tier: **grep for it.** If it is not there,
-say so. If something hypothetical needs a name, mark it as invented in the same sentence.
+confusion each. (`before_record` was later built for real and is in `hooks.py` now — the only way
+an invented name should become a real one.) Before citing any symbol, flag, file or tier: **grep
+for it.** If it is not there, say so. If something hypothetical needs a name, mark it as invented
+in the same sentence.
 
 **2 · Run it and paste the output. Do not assert behaviour.**
 Three claims made confidently here were false, and each was disproved in under a minute by
@@ -128,19 +134,21 @@ invented to fill a table is not.
 
 ## Current state
 
-**Tier 2 complete**, plus post-Tier-2 fixes: the path fence was removed in favour of a
-location-aware approval gate, tool descriptions were rewritten against both references, the system
-prompt moved to `omega_coding/system_prompt.py`, and two redaction bypasses were closed.
+**Tier 3 complete** — every row of `omega/TIER-3.md` filled. Compaction (`compact.py`, on
+`transform_context`) and prompt caching (`cache_control` in `omega_ai/anthropic.py`) closed the last
+two of the nine beginner failures. Redaction moved to `before_record`, so it masks every message
+rather than only tool output, which closes the hook-shape gap Tier 2 recorded.
 
-Since then, three additions that are **ergonomics, not scorecard progress** — none of the nine
-failures moved: `omega_coding/commands.py` (seven `/` commands and a `!` shell escape, routed
-through `execute_tool_call` so the escape meets the approval gate), `omega_coding/status.py` (a
-working line with truthful labels), and a single REPL event loop, which removed the httpcore
-traceback that four isolated reproductions had failed to trigger.
+Since then, product work — recorded in `omega/PRODUCT-BACKLOG.md`, not on the tier scorecard:
 
-Known gaps, all recorded in `omega/TIER-2.md`:
+- a Textual terminal UI, now the default; `--repl` gives the plain one. It needed no new agent
+  events: it reads the same ten the REPL does
+- thirteen `/` commands and a `!` shell escape, routed through `execute_tool_call` so the escape
+  meets the approval gate
+- `/login`: browser sign-in for a Claude or ChatGPT subscription, or an API key, stored in
+  `~/.omega/auth.json` at `0600`
+- `omega_coding/models.py`: built-in context windows read from models.dev, `/model refresh` to
+  update them, and the user's own `~/.omega/models.json` on top
+- CI on every push, and a PyPI publish on each published GitHub Release (`.github/workflows/`)
 
-- **compaction** (beginner failure #1) — long tasks still hit the context limit
-- **prompt caching** (#9) — every turn re-bills the system prompt and tool schemas
-- redaction sits on `after_tool_call` when it wants "before anything is recorded" — patched twice,
-  the shape is still wrong; the real fix needs a new hook in `harness.py`
+Not done: `omega-coding` is unclaimed on PyPI, so the publish workflow cannot succeed until it is.
