@@ -1,9 +1,15 @@
-"""A print-based REPL.
+"""The composition root, and the print-based REPL.
 
-Deliberately **not** a terminal UI. At Tier 2 a TUI would still hide more than it
-shows; plain `print` keeps every event visible. A real UI arrives at Tier 3, and
-it will subscribe to exactly the events this file already reads — that is the
-test of whether the vocabulary was designed for a renderer or for a printer.
+This file picks a provider, builds the harness and its hooks, and hands the
+result to a frontend: the terminal UI by default, the plain REPL with `--repl`,
+or a single answer on stdout with `-p`.
+
+**The REPL came first, deliberately.** At Tier 2 a TUI would have hidden more
+than it showed; plain `print` kept every event visible. The prediction was that a
+real UI would subscribe to exactly the events this file already read — the test
+of whether the vocabulary was designed for a renderer or for a printer. It held:
+the Textual UI in `tui/` reads the same ten agent events, and `agent_events.py`
+has not changed since before the UI existed.
 
 `--fake` runs the whole agent against scripted responses — no key, no network,
 no credits. It exercises the same loop, the same tools, and the same streaming
@@ -333,7 +339,7 @@ def _render(event: AgentEvent) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="omega", description="A terminal coding agent (Tier 2).")
+    parser = argparse.ArgumentParser(prog="omega", description="A terminal coding agent.")
     parser.add_argument(
         "--fake",
         action="store_true",
