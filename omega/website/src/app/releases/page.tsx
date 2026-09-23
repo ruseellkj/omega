@@ -42,16 +42,16 @@ export default function ReleasesPage() {
       <Reveal>
         <div className="mt-14 border-t-2 border-rule-strong pt-7">
           <p className="m-0 max-w-[62ch] text-ink-muted">
-            <span className="text-ink">omega is not installable as a package yet.</span> There is no{" "}
-            <code className="font-mono text-sm">pip install</code>, no{" "}
-            <code className="font-mono text-sm">curl … | sh</code>, and nothing on any index. Clone
-            the repository and run it with <code className="font-mono text-sm">uv run omega</code>.
-            Packaging is Tier 3+, and the mechanics are written down in{" "}
+            <span className="text-ink">omega is not on PyPI yet.</span> There is no{" "}
+            <code className="font-mono text-sm">pip install</code> and nothing on any index. The{" "}
+            <code className="font-mono text-sm">curl … | sh</code> installer on the docs page installs
+            straight from this repository instead, and the PyPI release workflow is written and waits
+            on the name being claimed — the mechanics are in{" "}
             <a
-              href={`${site.repo}/blob/main/omega/TIER-3-PLUS.md`}
+              href={`${site.repo}/blob/main/omega/PRODUCT-BACKLOG.md`}
               className="cursor-pointer underline decoration-rule-strong underline-offset-4 transition-colors duration-200 hover:text-oxblood"
             >
-              TIER-3-PLUS.md
+              PRODUCT-BACKLOG.md
               <ExternalArrow className="ml-1" />
             </a>
             .

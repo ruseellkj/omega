@@ -15,7 +15,7 @@ const MARK: Record<State, { glyph: string; word: string; tone: string }> = {
   planned: { glyph: "○", word: "planned", tone: "text-ink-muted" },
 };
 
-/** Every entry is transcribed from TIER-1.md and TIER-2.md. Nothing aspirational. */
+/** Every entry is transcribed from TIER-1.md, TIER-2.md and TIER-3.md. Nothing aspirational. */
 const TIERS: {
   tier: string;
   status: State;
@@ -24,25 +24,25 @@ const TIERS: {
 }[] = [
   {
     tier: "Tier 3",
-    status: "next",
+    status: "shipped",
     verdict: "Survives a task long enough to fill the context window.",
     groups: [
       {
-        name: "The two failures still standing",
+        name: "The two failures it closed",
         items: [
-          { name: "Compaction", note: "summarise the old prefix, keep the recent tail", state: "next" },
-          { name: "Prompt caching", note: "four breakpoints on a byte-stable prefix", state: "next" },
+          { name: "Compaction", note: "summarise the old prefix, keep the recent tail", state: "shipped" },
+          { name: "Prompt caching", note: "four breakpoints on a byte-stable prefix", state: "shipped" },
         ],
       },
       {
         name: "Everything else",
         items: [
-          { name: "Session branching", note: "parent_id is already on every entry", state: "planned" },
-          { name: "Search tools", note: "grep, find, ls — truncation and path resolution already exist", state: "planned" },
-          { name: "A real TUI", note: "the 10 agent events are already the contract", state: "planned" },
-          { name: "Structured logging", note: "a second listener on the same event stream", state: "planned" },
-          { name: "Image reading", note: "content blocks are a discriminated union", state: "planned" },
-          { name: "Subagents or plan mode", note: "a subagent is the headless driver, called from a tool", state: "planned" },
+          { name: "Session branching", note: "parent_id is already on every entry", state: "shipped" },
+          { name: "Search tools", note: "grep, find, ls — truncation and path resolution already exist", state: "shipped" },
+          { name: "A real TUI", note: "the 10 agent events are already the contract", state: "shipped" },
+          { name: "Structured logging", note: "a second listener on the same event stream", state: "shipped" },
+          { name: "Image reading", note: "content blocks are a discriminated union", state: "shipped" },
+          { name: "Subagents or plan mode", note: "a subagent is the headless driver, called from a tool", state: "shipped" },
         ],
       },
     ],

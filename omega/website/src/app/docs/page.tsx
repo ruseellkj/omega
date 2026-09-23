@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Reveal } from "@/components/site/interactive";
 import { ExternalArrow, GUTTER, PageHeader } from "@/components/site/primitives";
-import { sessionCommands, site } from "@/lib/content";
+import { install, keys, sessionCommands, site } from "@/lib/content";
 
 export const metadata: Metadata = {
   title: "Docs — omega",
@@ -60,7 +60,7 @@ const SECTIONS: { title: string; lede: string; items: Item[] }[] = [
         name: "Commands in the conversation",
         href: `${BLOB}/omega/src/omega_coding/commands.py`,
         where: "omega_coding/commands.py",
-        note: "A leading / addresses the program, a leading ! addresses the shell. Seven commands plus !cmd — which runs through the same run_shell tool the model uses, so it meets the same approval gate.",
+        note: "A leading / addresses the program, a leading ! addresses the shell. Thirteen commands plus !cmd — which runs through the same run_shell tool the model uses, so it meets the same approval gate.",
       },
       {
         name: "Sessions",
@@ -72,7 +72,7 @@ const SECTIONS: { title: string; lede: string; items: Item[] }[] = [
         name: "Providers and models",
         href: `${TREE}/omega/src/omega_ai`,
         where: "omega_ai/",
-        note: "Anthropic Messages and OpenAI Chat Completions. --base-url points the latter at Groq, Together, Ollama or vLLM.",
+        note: "Anthropic Messages, OpenAI Chat Completions, and a ChatGPT subscription over the Responses API. --base-url points OpenAI at Groq, Together, Ollama or vLLM. /model switches within a provider; every window was read from models.dev.",
       },
       {
         name: "Approvals and safety",
@@ -90,7 +90,7 @@ const SECTIONS: { title: string; lede: string; items: Item[] }[] = [
         name: "Watching the context",
         href: `${BLOB}/omega/src/omega_coding/context.py`,
         where: "omega_coding/context.py",
-        note: "A gauge and a cost meter. They measure the context problem; Tier 3 is what fixes it.",
+        note: "A gauge, a cost meter, and a breakdown of what fills the window — system, messages, tools, free. It says so when a window is a fallback rather than a known figure.",
       },
     ],
   },
@@ -102,7 +102,7 @@ const SECTIONS: { title: string; lede: string; items: Item[] }[] = [
         name: "CLI flags",
         href: `${BLOB}/omega/src/omega_coding/cli.py`,
         where: "omega_coding/cli.py",
-        note: "--fake, --yes, -c/--continue, --resume, --sessions, --no-save, --confine, --provider, --base-url, --model, --max-turns. That is all of them.",
+        note: "--fake, --yes, --confine, -c/--continue, --resume, --sessions, --tui, --repl, -p/--print, --no-log, --no-save, --provider, --base-url, --model, --max-turns, --context-window, --compact-threshold, --version. That is all of them.",
       },
       {
         name: "Built-in tools",
@@ -183,16 +183,16 @@ const SECTIONS: { title: string; lede: string; items: Item[] }[] = [
         note: "Including the estimates that were wrong, which are still in the file.",
       },
       {
-        name: "Tier 3 — the open contract",
+        name: "Tier 3 — survives a long task",
         href: `${BLOB}/omega/TIER-3.md`,
         where: "omega/TIER-3.md",
         note: "Written before the code, like the two before it. Compaction, prompt caching, and a Textual TUI — with the seam each one plugs into, and the single row whose seam does not exist yet.",
       },
       {
-        name: "Tier 3+ — the product backlog",
-        href: `${BLOB}/omega/TIER-3-PLUS.md`,
-        where: "omega/TIER-3-PLUS.md",
-        note: "Packaging, OAuth, extensions, themes. Every entry names the Tau module that proves the category is real work rather than a guess.",
+        name: "The product backlog",
+        href: `${BLOB}/omega/PRODUCT-BACKLOG.md`,
+        where: "omega/PRODUCT-BACKLOG.md",
+        note: "What shipped and what is left: distribution, sign-in and the model catalog are done; extensions, session surface and safety are open. Every entry names the Tau module that proves the category is real work rather than a guess.",
       },
       {
         name: "Roadmap",
@@ -308,6 +308,52 @@ export default function DocsPage() {
       </PageHeader>
 
       <div className="mt-16 grid gap-x-12 gap-y-14">
+        {/* One line, first. Everything below it assumes omega is already
+            installed, and until this section existed the page assumed a clone. */}
+        <Reveal>
+          <div className="grid gap-x-12 gap-y-6 border-t-2 border-rule-strong pt-7 md:grid-cols-12">
+            <div className="md:col-span-3">
+              <h2 className="label m-0 text-oxblood">Install</h2>
+              <p className="m-0 mt-2.5 max-w-[28ch] text-sm text-ink-muted">
+                Bootstraps <code className="font-mono">uv</code>, installs omega in its own
+                environment, and never edits a shell rc file.
+              </p>
+            </div>
+            <div className="md:col-span-9">
+              <pre className="m-0 overflow-x-auto rounded-sm border-2 border-rule-strong bg-term-bg p-4">
+                <code className="font-mono text-sm text-ink">{install}</code>
+              </pre>
+              <p className="m-0 mt-3 text-sm text-ink-muted">
+                Then <code className="font-mono text-oxblood">omega</code> — no provider flag.
+                It uses whichever provider you are signed in to, and{" "}
+                <code className="font-mono text-oxblood">/login</code> is how you sign in.
+              </p>
+            </div>
+          </div>
+        </Reveal>
+
+        {/* The keys. A third kind of thing from the two command lists: not
+            chosen before the conversation, not typed into it. */}
+        <Reveal delay={50}>
+          <div className="grid gap-x-12 gap-y-6 border-t-2 border-rule-strong pt-7 md:grid-cols-12">
+            <div className="md:col-span-3">
+              <h2 className="label m-0 text-oxblood">In the terminal UI</h2>
+              <p className="m-0 mt-2.5 max-w-[28ch] text-sm text-ink-muted">
+                <code className="font-mono">ctrl+c</code> stops the turn rather than the program —
+                with nothing running, it takes a second press to quit.
+              </p>
+            </div>
+            <ul className="m-0 grid list-none gap-x-10 gap-y-2.5 p-0 sm:grid-cols-2 md:col-span-9">
+              {keys.map((k) => (
+                <li key={k.key} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                  <code className="font-mono text-sm text-oxblood">{k.key}</code>
+                  <span className="text-sm text-ink-muted">{k.note}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Reveal>
+
         {/* The in-session commands, spelled out rather than linked. They are the
             newest thing omega has and the least discoverable — there is no
             autocomplete to find them with. */}

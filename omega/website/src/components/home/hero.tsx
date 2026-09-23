@@ -66,7 +66,7 @@ export function Hero() {
             </div>
 
             <p className="mt-5 text-sm text-ink-muted">
-              No package to install. Clone it and run it.
+              One line installs it — see the docs. Or clone it and run it.
             </p>
           </div>
 
@@ -79,8 +79,8 @@ export function Hero() {
                 <span className="text-oxblood">$ </span>
                 <span>uv run pytest -q</span>
                 {"\n"}
-                <span className="text-forest">{"  "}395 passed</span>
-                <span className="text-ink-muted"> in 2.9s</span>
+                <span className="text-forest">{"  "}713 passed</span>
+                <span className="text-ink-muted"> in 34.82s</span>
               </div>
             </Terminal>
           </div>

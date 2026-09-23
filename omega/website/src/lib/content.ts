@@ -2,7 +2,8 @@
  * Single source of truth for everything the page claims.
  *
  * Every number here is measured and every quote is attributable. Figures come
- * from omega/TIER-1.md and omega/TIER-2.md; commands come from omega/README.md.
+ * from omega/README.md and the tier documents; commands come from omega/README.md
+ * and the command registry in omega_coding/commands.py.
  * If a claim is not in one of those files, it does not appear on the site.
  *
  * `measured` carries a third column because the tier figures are history. Tier 2
@@ -33,13 +34,44 @@ export const site = {
 export const thesis =
   "A coding agent is a program that asks a model for help, does what the model asks for, tells it what happened, and repeats until it says it is finished.";
 
-/** README.md, "Run it". Chosen before the conversation starts. */
+/**
+ * README.md, "Install it" — one line, and the only one a new user needs. The
+ * script bootstraps `uv`, installs omega in an isolated environment, verifies
+ * the command it created, and never edits a shell rc file.
+ */
+export const install = "curl -fsSL https://omega-agent.vercel.app/install.sh | sh";
+
+/**
+ * README.md, "Run it". Chosen before the conversation starts.
+ *
+ * **`--provider` is gone from this list on purpose.** It used to be required for
+ * OpenAI, defaulting to Anthropic — a flag whose value was already sitting in
+ * the user's credentials file. omega now uses whichever provider you are signed
+ * in to, and the flag survives only as an override.
+ */
 export const commands = [
-  { cmd: "uv run omega --fake", note: "scripted responses — no key, no network, no credits" },
-  { cmd: "uv run omega", note: "Anthropic Messages" },
-  { cmd: "uv run omega --provider openai", note: "OpenAI Chat Completions" },
-  { cmd: "uv run omega -c", note: "continue the most recent session for this project" },
-  { cmd: "uv run omega --sessions", note: "list saved sessions, newest first" },
+  { cmd: "omega", note: "the terminal UI — this is the whole command" },
+  { cmd: "omega --fake", note: "scripted responses — no key, no network, no credits" },
+  { cmd: 'omega -p "fix the failing test"', note: "one shot: answer on stdout, exit — pipeable" },
+  { cmd: "omega --repl", note: "the plain print/input prompt instead of the UI" },
+  { cmd: "omega -c", note: "continue the most recent session for this project" },
+  { cmd: "omega --sessions", note: "list saved sessions, newest first" },
+  { cmd: "omega --version", note: "which omega this is — needs no credentials" },
+] as const;
+
+/**
+ * The keys, which are a third kind of thing again: not chosen before the
+ * conversation and not typed into it. Only meaningful in the terminal UI.
+ */
+export const keys = [
+  { key: "ctrl+c", note: "stop the turn in progress — press twice to quit when nothing is running" },
+  { key: "ctrl+d", note: "quit" },
+  { key: "esc", note: "close the palette, or stop a turn and ask, or recall your last message" },
+  { key: "↑ ↓", note: "walk back through what you typed — ↑ first recalls a message you queued mid-turn" },
+  { key: "tab", note: "complete the highlighted command" },
+  { key: "ctrl+o", note: "expand every tool row at once" },
+  { key: "/", note: "open the command list, filtered as you type" },
+  { key: "ctrl+q", note: "does not quit — it tells you which keys do" },
 ] as const;
 
 /**
@@ -49,11 +81,18 @@ export const commands = [
  */
 export const sessionCommands = [
   { cmd: "/help", note: "list these commands" },
+  { cmd: "/login [provider]", note: "sign in — a Claude or ChatGPT subscription in the browser, or an API key" },
+  { cmd: "/logout [provider]", note: "remove a stored credential; exported variables are left alone" },
   { cmd: "/sessions", note: "saved sessions for this project" },
   { cmd: "/resume <id>", note: "switch to another session, without restarting" },
   { cmd: "/clear", note: "start a fresh session; the old one is kept on disk" },
+  { cmd: "/rewind [n]", note: "go back before your last question; the old branch is kept" },
+  { cmd: "/compact [pct]", note: "shrink the conversation now, rather than at 80%" },
+  { cmd: "/theme [name]", note: "slate, oxblood-dark, oxblood-light, high-contrast" },
   { cmd: "/cost", note: "tokens and spend so far" },
-  { cmd: "/context", note: "how full the context window is" },
+  { cmd: "/context", note: "how full the window is, and what is filling it — system, messages, tools" },
+  { cmd: "/model [name]", note: "switch model, keeping the conversation; the window follows it" },
+  { cmd: "/model refresh", note: "fetch the current models and their windows from models.dev" },
   { cmd: "/exit", note: "leave omega" },
   { cmd: "!<command>", note: "run a shell command — no model, no tokens" },
 ] as const;
@@ -88,24 +127,24 @@ export const layers = [
 
 /** TIER-2.md, the comparison table at lines 14-19. */
 export const measured = [
-  { label: "Source lines", tier1: "1,577", tier2: "4,654", today: "6,247" },
-  { label: "Test lines", tier1: "499", tier2: "4,257", today: "6,274" },
-  { label: "Tests", tier1: "45", tier2: "289", today: "395" },
+  { label: "Source lines", tier1: "1,577", tier2: "4,654", today: "14,220" },
+  { label: "Test lines", tier1: "499", tier2: "4,257", today: "13,308" },
+  { label: "Tests", tier1: "45", tier2: "289", today: "713" },
   { label: "loop.py", tier1: "151", tier2: "190", today: "190" },
 ] as const;
 
 export const providers = [
   {
     name: "Anthropic Messages",
-    file: "providers/anthropic.py",
+    file: "omega_ai/anthropic.py",
     detail:
       "Content blocks, thinking blocks with signatures that must return verbatim, and tool-use ids that must be answered exactly once.",
   },
   {
     name: "OpenAI Chat Completions",
-    file: "providers/openai.py",
+    file: "omega_ai/openai.py + openai_codex.py",
     detail:
-      "Not a feature — the exam. A genuinely different wire format, and the same adapter reaches Groq, Together, Ollama and vLLM. The format is the unit, not the vendor.",
+      "Not a feature — the exam. A genuinely different wire format, and the same adapter reaches Groq, Together, Ollama and vLLM. A ChatGPT subscription speaks a third format, the Responses API, and gets its own adapter. The format is the unit, not the vendor.",
   },
 ] as const;
 
@@ -125,20 +164,31 @@ export const timeline = [
   },
   {
     tier: "Tier 3",
+    status: "closed" as const,
+    headline: "Survives a task long enough to fill the context window, and has a face.",
+    body: "Compaction and prompt caching closed the last two beginner failures. A Textual UI made steering reachable by a human rather than only by a test, and the ten agent events turned out to be the contract a real UI needed.",
+  },
+  {
+    tier: "Beyond the tiers",
     status: "next" as const,
-    headline: "Survives a task long enough to fill the context window.",
-    body: "That is the whole of Tier 3 — and the two beginner failures still standing are the two it fixes.",
+    headline: "Installable, and signed in to.",
+    body: "A curl installer, CI and a release workflow. /login signs in with a Claude or ChatGPT subscription in the browser, or stores an API key in a 0600 file. The model list refreshes from models.dev. Nothing is on PyPI yet — the release workflow waits on the name being claimed.",
   },
 ] as const;
 
-/** TIER-2.md Part 2 — "Things Tier 3 adds next". Each seam already exists. */
+/**
+ * PRODUCT-BACKLOG.md — what is left, now that Tier 3 has closed. Every row that
+ * used to be here shipped, which is why the list is shorter and less certain:
+ * these are product concerns, and the seam column is honest about the two that
+ * do not have one yet.
+ */
 export const upcoming = [
-  { name: "Session branching", seam: "parent_id is already on every entry" },
-  { name: "Search tools", seam: "truncate_output() and paths.py both exist" },
-  { name: "A real TUI", seam: "the 10 agent events are the UI contract" },
-  { name: "Structured logging", seam: "a second listener on the same event stream" },
-  { name: "Image reading", seam: "content blocks are a discriminated union" },
-  { name: "Subagents or plan mode", seam: "a subagent is the headless driver, called from a tool" },
+  { name: "Claim omega-coding on PyPI", seam: "the workflow and the installer are already written" },
+  { name: "Self-update and version checking", seam: "--version exists; nothing compares it to a remote" },
+  { name: "Settings file", seam: "the theme already persists to ~/.omega/tui.json" },
+  { name: "Extensions and skills", seam: "none yet — nothing loads at runtime" },
+  { name: "Sandboxing", seam: "the prepare seam shipped in Tier 2" },
+  { name: "An approval modal for --yes-free print mode", seam: "there is no one to ask in a pipe" },
 ] as const;
 
 /**
@@ -197,10 +247,10 @@ export const claims = [
   },
   {
     title: "The loop holds at 190 lines",
-    body: "It hit 249 while the between-turns queues went in. Rather than let it grow, tool dispatch was extracted to its own file. Source has since grown by 758 lines and the loop has not moved.",
+    body: "It hit 249 while the between-turns queues went in. Rather than let it grow, tool dispatch was extracted to its own file. Source has since grown to 14,220 lines and the loop has not moved.",
   },
   {
-    title: "395 tests, none touching the network",
-    body: "Every provider call is faked at the interface boundary, which is why omega_ai/fake.py was written before the real adapter. The suite runs in under three seconds with no key.",
+    title: "713 tests, none touching the network",
+    body: "Every provider call is faked at the interface boundary, which is why omega_ai/fake.py was written before the real adapter. The whole suite runs with no key and no network.",
   },
 ] as const;

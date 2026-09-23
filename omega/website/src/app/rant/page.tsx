@@ -32,7 +32,7 @@ const COMPARISON = [
   { aspect: "The loop", spike: "the whole file", layered: "190 lines" },
   { aspect: "Add a provider", spike: "edit six places", layered: "add one file" },
   { aspect: "Interrupt it", spike: "transcript is dead", layered: "repaired on resume" },
-  { aspect: "Tests", spike: "none", layered: "395, offline" },
+  { aspect: "Tests", spike: "none", layered: "713, offline" },
 ] as const;
 
 const SECTIONS = [
