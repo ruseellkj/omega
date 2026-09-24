@@ -7,6 +7,11 @@ name = "omega-coding"
 version = "0.1.0"
 description = "A terminal coding agent, built from scratch in layers."
 readme = "README.md"
+# Tau's two lines (research/tau/pyproject.toml:10-11). The file is a copy of the
+# repository-root LICENSE: a license file has to sit inside the project it ships
+# with, and this project is `omega/`, not the repository.
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.14"
 dependencies = [
     "anthropic>=0.120.2",
@@ -38,6 +43,13 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/omega_ai", "src/omega_agent", "src/omega_coding"]
+
+# The sdist takes everything in `omega/` that git does not ignore, and the
+# website lives in `omega/website/` — so without this a Python package shipped a
+# Next.js site: 41 files from a clean checkout, 253 MB with `node_modules` from
+# a local one. The leading `/` anchors the path to this directory.
+[tool.hatch.build.targets.sdist]
+exclude = ["/website"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

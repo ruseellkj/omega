@@ -10,6 +10,7 @@
   <img src="https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white" alt="Python 3.14">
   <img src="https://img.shields.io/badge/mypy-strict-2A6DB2" alt="mypy strict">
   <img src="https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black" alt="Lint: ruff">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-6E2231" alt="License: MIT"></a>
 </p>
 
 <p align="center">
@@ -55,6 +56,7 @@ terminal UI, persistent sessions, compaction, prompt caching and browser sign-in
 - [Development](#development)
 - [Documentation](#documentation)
 - [Credits](#credits)
+- [License](#license)
 
 ## Quickstart
 
@@ -453,6 +455,10 @@ omega exists because two excellent open-source agents made the inside of a codin
 omega shares no code with either. Both were read, compared and taken apart; then omega was written
 from scratch. Where the two agreed, that was treated as the architecture. Where they differed,
 omega's notes record which way it went, and why.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
 
 ---
 
