@@ -25,19 +25,26 @@ permissions:
 jobs:
   publish:
     name: Build and publish to PyPI
-    runs-on: ubuntu-latest
+    # Pinned rather than `ubuntu-latest`, which moves to Ubuntu 26 from
+    # 2026-10-19. uv fetches Python 3.14 itself, so the image barely matters —
+    # but an image change should be a commit someone chose, not a surprise.
+    runs-on: ubuntu-24.04
     environment: pypi
     defaults:
       run:
         working-directory: omega
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
+      # No cache on a release build. A cache is shared with ordinary CI runs,
+      # so restoring one here would let anything that poisoned it ride into
+      # the upload. setup-uv v10 already disables it for `release` events by
+      # default; saying so explicitly keeps the next bump from undoing it.
       - name: Set up uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.2.0
         with:
-          enable-cache: true
+          enable-cache: false
 
       # The four gates, before anything is uploaded. A publish workflow without
       # them can ship code that does not import — and a release on PyPI cannot

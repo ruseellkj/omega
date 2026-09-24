@@ -20,14 +20,19 @@ permissions:
 jobs:
   gates:
     name: tests · types · lint · evals
-    runs-on: ubuntu-latest
+    # Pinned rather than `ubuntu-latest`, which moves to Ubuntu 26 from
+    # 2026-10-19. uv fetches Python 3.14 itself, so the image barely matters —
+    # but an image change should be a commit someone chose, not a surprise.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: omega
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v5
+      # An exact version: setup-uv stopped moving its major tags at v8, so there
+      # is no `@v10` to float on. checkout still has them, hence `@v7`.
+      - uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: true
 
