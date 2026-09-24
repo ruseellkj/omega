@@ -15,7 +15,7 @@ shipping — he reads every line himself.
 | `research/pi/` | **reference 1**: Pi (TypeScript), `github.com/earendil-works/pi` |
 | `research/tau/` | **reference 2**: Tau (Python), `github.com/huggingface/tau` — a port of Pi |
 | `agent.py` | the original 188-line prototype, kept for comparison |
-| `omega/website/` | a Next.js site. **A separate session owns this — do not touch it.** |
+| `omega/website/` | a Next.js site, usually worked on by a separate session. **Edit or commit it only when asked, and always in its own commit.** |
 
 `research/pi` and `research/tau` are read-only reference material. Read them to answer "how do the
 references do this?" — never edit them.
@@ -34,6 +34,10 @@ uv run omega --fake --yes -p "hi"   # one scripted turn, then exit — no key, n
 
 Run it with `-p` from a tool call. Without it, omega opens the terminal UI on a TTY, and with
 no TTY it falls back to the REPL and exits at the prompt without running a turn.
+
+`-p` cannot reach the screen: `/` commands, rows and scrolling exist only in the TUI. To check
+them, drive `OmegaApp` through Textual's `app.run_test()`, as `tests/test_tui_widgets.py` does,
+and assert on the widgets. A scroll position settles about 0.1s after rows mount, so pause first.
 
 Python >=3.14, pinned by the repo-root `.python-version`. `asyncio_mode = "auto"`, so async tests need no marker.
 
@@ -123,11 +127,26 @@ invented to fill a table is not.
 - **Docstrings carry the argument, not just the description.** Most modules explain *why* they are
   shaped that way, including which alternatives were rejected. Match that when adding code.
 - **Conventional Commits**, since `6aa9261`. Earlier subjects are prose and predate the decision.
-- **Do not commit after every step, and never `git push`** — that is Rushil's call. Make the
-  change, verify it, report it, and stop.
+- **Do not commit after every step, and never `git push` unasked** — that is Rushil's call. Make
+  the change, verify it, report it, and stop. When he does ask for a push: `origin` is
+  `ruseellkj/omega`, and git's keychain login is `rushil-searce`, which gets a 403. Push once as
+  the owner, then switch back:
+  ```bash
+  gh auth switch -u ruseellkj && git -c credential.helper= -c credential.helper='!gh auth git-credential' push origin main; gh auth switch -u rushil-searce
+  ```
+  The pre-push hook records the pushed commits for the Notion sync log.
 - **Never `git add -A` or `git add .`** — stage named paths only. `omega/website/` belongs to a
   different session, and one blanket add swept three of its in-progress files into an unrelated
   commit, which would have reverted merged work on push.
+- **Sessions share one working tree, so one file can hold two sessions' hunks.** Commit each
+  session's work on its own. To stage only the other session's version of a shared file, write
+  that version to a copy and stage the copy's blob:
+  `git update-index --cacheinfo 100644,$(git hash-object -w <copy>),<path>`. The working tree stays
+  untouched. Check the split commit is green on its own in a scratch `git worktree` first.
+- **Checking the site:** its `next dev` is often already running. Do not run `next build` beside
+  it, because both write `.next/`. The checks are `npx tsc --noEmit` and `npx eslint .`, run from
+  `omega/website/`. Another project's dev server also runs on this machine, so confirm a port by
+  the page's `<title>` before trusting a `curl`.
 - **Plain language in chat, depth in files.** Explanations should be mechanical and worked through,
   not summarised; the exhaustive version belongs in `dev-notes/`. For conceptual questions the
   `explain-in-depth` skill carries the full method.
@@ -149,6 +168,10 @@ Since then, product work — recorded in `omega/PRODUCT-BACKLOG.md`, not on the 
   selection before it stops anything, and `omega_coding/clipboard.py` reaches the real clipboard
   (`pbcopy` first, OSC 52 over SSH). A big paste folds to `[paste #1 +N lines]`; pasting it again
   expands it
+- a resumed session is drawn, not just counted. `TuiState.load_messages` rebuilds the transcript
+  after `/resume`, `/clear` and `/rewind`, and on `--resume` or `--continue`. It is tested against
+  a live turn. Those three commands wait for a running turn, because `/rewind` mid-turn saved an
+  answer whose question it had cut
 - `/login`: browser sign-in for a Claude or ChatGPT subscription, or an API key, stored in
   `~/.omega/auth.json` at `0600`
 - `omega_coding/models.py`: built-in context windows read from models.dev, `/model refresh` to
