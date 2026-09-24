@@ -137,7 +137,9 @@ export const commands = [
  * conversation and not typed into it. Only meaningful in the terminal UI.
  */
 export const keys = [
-  { key: "ctrl+c", note: "stop the turn in progress — press twice to quit when nothing is running" },
+  { key: "ctrl+c", note: "copy the selection if there is one; otherwise stop the turn — press twice to quit when nothing is running" },
+  { key: "select", note: "selecting text copies it, and the status line says how much" },
+  { key: "ctrl+v", note: "paste from the system clipboard — a long paste folds to [paste #1 +N lines]" },
   { key: "ctrl+d", note: "quit" },
   { key: "esc", note: "close the palette, or stop a turn and ask, or recall your last message" },
   { key: "↑ ↓", note: "walk back through what you typed — ↑ first recalls a message you queued mid-turn" },
@@ -157,11 +159,12 @@ export const sessionCommands = [
   { cmd: "/login [provider]", note: "sign in — a Claude or ChatGPT subscription in the browser, or an API key" },
   { cmd: "/logout [provider]", note: "remove a stored credential; exported variables are left alone" },
   { cmd: "/sessions", note: "saved sessions for this project" },
-  { cmd: "/resume <id>", note: "switch to another session, without restarting" },
+  { cmd: "/resume <id>", note: "switch to another session, without restarting, and see its conversation" },
   { cmd: "/clear", note: "start a fresh session; the old one is kept on disk" },
   { cmd: "/rewind [n]", note: "go back before your last question; the old branch is kept" },
   { cmd: "/compact [pct]", note: "shrink the conversation now, rather than at 80%" },
   { cmd: "/theme [name]", note: "slate, oxblood-dark, oxblood-light, high-contrast" },
+  { cmd: "/config [setting]", note: "terminal UI settings — /config auto-copy off stops selecting from copying" },
   { cmd: "/cost", note: "tokens and spend so far" },
   { cmd: "/context", note: "how full the window is, and what is filling it — system, messages, tools" },
   { cmd: "/model [name]", note: "switch model, keeping the conversation; the window follows it" },
@@ -172,9 +175,9 @@ export const sessionCommands = [
 
 /** TIER-2.md, the comparison table at lines 14-19. */
 export const measured = [
-  { label: "Source lines", tier1: "1,577", tier2: "4,654", today: "14,226" },
-  { label: "Test lines", tier1: "499", tier2: "4,257", today: "13,308" },
-  { label: "Tests", tier1: "45", tier2: "289", today: "713" },
+  { label: "Source lines", tier1: "1,577", tier2: "4,654", today: "15,105" },
+  { label: "Test lines", tier1: "499", tier2: "4,257", today: "14,251" },
+  { label: "Tests", tier1: "45", tier2: "289", today: "758" },
   { label: "loop.py", tier1: "151", tier2: "190", today: "190" },
 ] as const;
 

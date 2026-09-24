@@ -222,7 +222,7 @@ project not to run low. → [`TIER-3.md`](omega/TIER-3.md)
 
 ### Beyond the tiers — a product
 
-**Today (2026-09-23) · 14,226 lines · 713 tests**
+**Today (2026-09-24) · 15,105 lines · 758 tests**
 
 With every beginner failure closed, the work moved from the tier scorecard to the
 [product backlog](omega/PRODUCT-BACKLOG.md):
@@ -231,6 +231,8 @@ With every beginner failure closed, the work moved from the tier scorecard to th
 - **A model catalog** — built-in context windows read from [models.dev](https://models.dev),
   `/model refresh` to update them, and your own `~/.omega/models.json` on top
 - **`/context`** — how full the window is, and what is filling it: system, messages, tools, free
+- **Copy and paste** — selecting text copies it, `ctrl+c` copies a selection before it stops
+  anything, and `ctrl+v` reads the system clipboard (`pbcopy` first, OSC 52 over SSH)
 - **Shipping** — CI on every push, and a PyPI publish on every published GitHub Release
   ([`ci.yml`](.github/workflows/ci.yml), [`publish.yml`](.github/workflows/publish.yml))
 
@@ -288,9 +290,10 @@ the model uses. Everything else goes to the model.
 | `/cost` | tokens and spend so far |
 | `/rewind [n]` | go back before your last question; the old branch is kept |
 | `/sessions` | saved sessions for this project |
-| `/resume <id>` | switch to another session |
+| `/resume <id>` | switch to another session; the terminal UI shows its conversation |
 | `/clear` | start a fresh session; the old one is kept |
 | `/theme [name]` | slate, oxblood-dark, oxblood-light, high-contrast |
+| `/config [setting]` | terminal UI settings — `/config auto-copy off` stops selecting from copying |
 | `/exit` | leave omega |
 | `!<command>` | run a shell command — no model, no tokens |
 
@@ -299,7 +302,9 @@ the model uses. Everything else goes to the model.
 
 | Key | What it does |
 |---|---|
-| `ctrl+c` | stop the turn in progress — press twice to quit when nothing is running |
+| `ctrl+c` | copy the selection if there is one; otherwise stop the turn — press twice to quit when nothing is running |
+| select text | copies it; the status line says how much |
+| `ctrl+v` | paste from the system clipboard — a long paste folds to `[paste #1 +N lines]` |
 | `ctrl+d` | quit |
 | `esc` | close the palette, stop a turn and ask, or recall your last message |
 | `↑` `↓` | walk back through what you typed — `↑` first recalls a message you queued mid-turn |

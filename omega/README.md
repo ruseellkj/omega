@@ -6,10 +6,10 @@ Named after a physics letter, following [Pi](https://github.com/earendil-works/p
 [Tau](https://github.com/huggingface/tau) — the two MIT-licensed agents this is studied from.
 Written independently, not forked.
 
-**Currently at Tier 3 — "it survives a long task, and has a face."** 14,226 lines of source,
-713 tests, all offline.
+**Currently at Tier 3 — "it survives a long task, and has a face."** 15,105 lines of source,
+758 tests, all offline.
 
-* **[`READING-ORDER.md`](READING-ORDER.md) — start here.** All 52 files in the order to read them,
+* **[`READING-ORDER.md`](READING-ORDER.md) — start here.** All 53 files in the order to read them,
   one line each, plus the questions to hold while reading.
 * [`TIER-1.md`](TIER-1.md) — what the first tier does, and what it deliberately left out
 * [`TIER-2.md`](TIER-2.md) — what this tier adds, and where each remaining gap plugs in at Tier 3
@@ -60,6 +60,11 @@ approval mode, session and version — which scroll away as soon as you ask some
 idle prompt it arms and says so, because `ctrl+c` is the reflex for "stop that" and a closed session
 has no undo. `ctrl+q` is deliberately not an exit — Textual provides it by default, and a third way
 out with no confirmation would undo the point of the other two.
+
+**Copying:** selecting text copies it, and the status line says how much; `/config auto-copy off`
+stops that. With something selected, `ctrl+c` copies it instead of stopping anything. `ctrl+v`
+pastes from the system clipboard — `pbcopy` first, OSC 52 over SSH — and a long paste folds to
+`[paste #1 +N lines]` in the prompt, while the model still gets every line.
 
 `/` opens the command list, `↑`/`↓` walk back through what you typed, `ctrl+o` expands every tool
 call at once (and shows the startup facts again when there are none yet), and a finished tool call
@@ -179,15 +184,21 @@ Everything above is chosen before the conversation starts. Inside it, a leading 
 program rather than the model, and a leading `!` addresses the shell:
 
 ```
-/help            list these commands
-/sessions        saved sessions for this project
-/resume <id>     switch to another session, without restarting
-/clear           start a fresh session; the old one is kept on disk
-/model [name]    switch model, keeping the conversation
-/cost            tokens and spend so far
-/context         how full the context window is
-/exit            leave omega
-!<command>       run a shell command — no model, no tokens
+/help                  list these commands
+/login [provider]      sign in — a subscription in the browser, or an API key
+/logout [provider]     remove a stored credential
+/sessions              saved sessions for this project
+/resume <id>           switch to another session; the terminal UI shows its conversation
+/clear                 start a fresh session; the old one is kept on disk
+/rewind [n]            go back before your last question; the old branch is kept
+/compact [pct]         shrink the conversation now
+/model [name|refresh]  switch model, keeping the conversation, or refresh the list
+/cost                  tokens and spend so far
+/context               how full the context window is
+/theme [name]          change the colours (terminal UI only)
+/config [setting]      settings such as auto-copy (terminal UI only)
+/exit                  leave omega
+!<command>             run a shell command — no model, no tokens
 ```
 
 `/context` shows the total, then the breakdown — and says so when the window is a guess:
@@ -317,7 +328,7 @@ the argument for diverging is in `src/omega_coding/commands.py`.
 ## Check it
 
 ```bash
-uv run pytest -q                    # 713 tests, ~34s, fully offline
+uv run pytest -q                    # 758 tests, ~45s, fully offline
 uv run mypy --strict src
 uv run ruff check .
 uv run python -m omega_coding.evals # smoke eval: does the assembled agent still work?

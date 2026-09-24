@@ -365,7 +365,8 @@ export default function DocsPage() {
               <h2 className="label m-0 text-oxblood">In the terminal UI</h2>
               <p className="m-0 mt-2.5 text-sm text-ink-muted md:max-w-[28ch]">
                 <code className="font-mono">ctrl+c</code> stops the turn rather than the program —
-                with nothing running, it takes a second press to quit.
+                with nothing running, it takes a second press to quit. With text selected, it
+                copies instead.
               </p>
             </div>
             <ul className="m-0 grid list-none gap-x-10 gap-y-2.5 p-0 sm:grid-cols-2 md:col-span-9">
