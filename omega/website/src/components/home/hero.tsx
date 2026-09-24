@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { SessionReplay } from "@/components/home/session-replay";
+import { SessionSnapshot } from "@/components/home/session-snapshot";
 import { Reveal } from "@/components/site/interactive";
 import { InstallBox } from "@/components/site/install-box";
 import { ExternalArrow, GUTTER } from "@/components/site/primitives";
@@ -34,12 +34,11 @@ function GridPaper() {
  *
  * Left: what it is, and the install command — where both references put it,
  * because the hero is the one place every visitor reads. Right: the program
- * itself, running. The old right column was a list of flags, which told you
- * omega has a command line and showed nothing of what using it is like.
+ * itself, one finished turn. The old right column was a list of flags, which
+ * told you omega has a command line and showed nothing of what using it is like.
  *
- * The split starts at `lg`, not `md`. The replay needs ~50 terminal columns for
- * the wordmark, and half of a 768px screen is narrower than that; stacked, it
- * gets the full width instead of a squeezed half.
+ * The split starts at `lg`, not `md`. Half of a 768px screen squeezes both the
+ * install command and the terminal; stacked, each gets the full width.
  */
 export function Hero() {
   return (
@@ -83,7 +82,7 @@ export function Hero() {
           </div>
 
           <div className="min-w-0 lg:col-span-7">
-            <SessionReplay />
+            <SessionSnapshot />
           </div>
         </div>
       </Reveal>

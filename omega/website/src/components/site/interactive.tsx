@@ -124,16 +124,21 @@ function CheckGlyph() {
   );
 }
 
+/**
+ * Transparent in both places, with a hairline and nothing else. The first
+ * version filled the install box's button with the accent colour, and a filled
+ * button beside every command competed with the command itself.
+ *
+ * `hover:bg-transparent` is not redundant: the shadcn `ghost` variant brings
+ * its own hover fill, which here would be the forest accent.
+ */
 const COPY_TONES = {
-  /** On paper: the site's hairline-and-oxblood control. */
+  /** On paper. */
   paper:
-    "border border-rule bg-paper-raised text-ink-muted hover:border-oxblood hover:bg-paper-raised hover:text-oxblood",
-  /** Inside a night terminal: the same control in the TUI's colours. */
-  night:
-    "border border-night-rule bg-night-raised text-night-muted hover:border-night-accent hover:bg-night-raised hover:text-night-ink",
-  /** A primary action — the install box, where copying *is* the point. */
-  accent:
-    "border border-night-accent bg-night-accent text-night hover:bg-night-ink hover:border-night-ink hover:text-night",
+    "border border-rule bg-transparent text-ink-muted hover:border-rule-strong hover:bg-transparent hover:text-ink",
+  /** Inside a terminal. */
+  shell:
+    "border border-white/15 bg-transparent text-shell-dim hover:border-white/35 hover:bg-transparent hover:text-white",
 } as const;
 
 /**
@@ -181,7 +186,7 @@ export function CopyButton({
       variant="ghost"
       aria-label={iconOnly ? `${label}: ${value}` : undefined}
       title={iconOnly ? `${label} command` : undefined}
-      className={`label h-auto shrink-0 cursor-pointer gap-1.5 rounded-sm px-2.5 py-1.5 transition-colors duration-200 ${COPY_TONES[tone]} ${className}`}
+      className={`label h-auto shrink-0 cursor-pointer gap-1.5 rounded-[6px] px-2.5 py-1.5 transition-colors duration-200 ${COPY_TONES[tone]} ${className}`}
     >
       {state === "copied" ? <CheckGlyph /> : <CopyGlyph />}
       <span aria-live="polite" className={iconOnly ? "sr-only" : ""}>

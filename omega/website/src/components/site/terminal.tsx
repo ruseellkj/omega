@@ -1,29 +1,43 @@
 import { CopyButton } from "@/components/site/interactive";
 
 /**
- * A terminal window. Chrome only — the caller supplies the lines.
+ * The one terminal frame on the site. Every box that shows a command or a
+ * session uses it, so there is one terminal style rather than four.
  *
- * Extracted because the same frame is wanted anywhere a command is shown, and
- * because the window dressing was drowning the hero's markup.
+ * The shape is Tau's `.terminal` (research/tau/website/assets/css/main.css:417):
+ * a dark body, a title bar with a faint rule under it, three dots of which only
+ * the first has colour, a monospace title at low contrast. Static — it shows
+ * text, it does not perform it.
+ *
+ * `rounded-[10px]` is spelled out because this theme maps `rounded-md` and
+ * `rounded-lg` to 2px (globals.css), which is what made the first boxes look
+ * square.
  */
 export function Terminal({
   title = "omega",
+  bar,
   children,
   className = "",
+  bodyClassName = "px-5 py-4",
 }: {
   title?: string;
+  /** Replaces the title — the install box puts its tabs here. */
+  bar?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
+  bodyClassName?: string;
 }) {
   return (
-    <div className={`rounded-[5px] border border-rule bg-term font-mono text-[13px] leading-relaxed ${className}`}>
-      <div className="flex items-center gap-1.5 border-b border-rule px-4 py-2.5">
-        <span className="h-2 w-2 rounded-full bg-oxblood/40" />
-        <span className="h-2 w-2 rounded-full bg-forest/40" />
-        <span className="h-2 w-2 rounded-full bg-ink-muted/30" />
-        <span className="label ml-2 truncate text-ink-muted">{title}</span>
+    <div
+      className={`min-w-0 overflow-hidden rounded-[10px] border border-rule-strong bg-shell font-mono text-[13px] leading-[1.8] text-shell-ink shadow-[0_24px_50px_-30px_rgba(34,28,26,0.55)] ${className}`}
+    >
+      <div className="flex items-center gap-2 border-b border-white/[0.07] px-4 py-2.5">
+        <span aria-hidden="true" className="size-[11px] shrink-0 rounded-full bg-shell-red/80" />
+        <span aria-hidden="true" className="size-[11px] shrink-0 rounded-full bg-white/[0.18]" />
+        <span aria-hidden="true" className="size-[11px] shrink-0 rounded-full bg-white/[0.18]" />
+        {bar ?? <span className="ml-2 truncate text-[12px] text-white/40">{title}</span>}
       </div>
-      <div className="px-4 py-3.5">{children}</div>
+      <div className={bodyClassName}>{children}</div>
     </div>
   );
 }
@@ -48,26 +62,29 @@ export function CommandLine({
   return (
     <div className="pb-3 last:pb-0">
       <div className="flex items-center gap-3">
-        <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap py-0.5 [scrollbar-width:thin]">
-          <span aria-hidden="true" className="select-none text-oxblood">
+        <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap py-0.5 text-white [scrollbar-width:thin]">
+          <span aria-hidden="true" className="select-none text-shell-dim">
             ${" "}
           </span>
           {cmd}
         </code>
-        <CopyButton value={cmd} iconOnly className="px-2 py-1.5" />
+        <CopyButton value={cmd} tone="shell" iconOnly className="px-2 py-1.5" />
       </div>
       {output && output.length > 0 && (
-        <pre className="m-0 mt-1 whitespace-pre-wrap break-words font-mono text-[12.5px] text-forest">
+        <pre className="m-0 mt-0.5 whitespace-pre-wrap break-words font-mono text-[12.5px] text-shell-dim">
           {output.join("\n")}
         </pre>
       )}
-      {note && <p className="m-0 mt-1 font-sans text-[12.5px] leading-snug text-ink-muted">{note}</p>}
+      {note && (
+        <p className="m-0 mt-1 font-sans text-[12.5px] leading-snug text-shell-dim">{note}</p>
+      )}
     </div>
   );
 }
 
 /**
- * A small terminal for one step: a number, what the step is, the command.
+ * A small terminal for one step: a number and a title in the bar, the command
+ * below.
  *
  * The home page's first-steps grid is six of these rather than one long
  * terminal, because each step is a different moment — before install, inside
@@ -88,16 +105,15 @@ export function ShellCard({
   note?: string;
 }) {
   return (
-    <div className="group flex h-full min-w-0 flex-col rounded-[5px] border border-rule bg-term font-mono text-[13px] leading-relaxed transition-[border-color,box-shadow] duration-300 hover:border-rule-strong hover:shadow-[0_14px_30px_-22px_rgba(34,28,26,0.45)]">
-      <div className="flex items-center gap-2.5 border-b border-rule px-4 py-2.5">
-        <span className="tnum label text-oxblood">{String(step).padStart(2, "0")}</span>
-        <span className="label truncate text-ink-muted transition-colors duration-200 group-hover:text-ink">
-          {title}
+    <Terminal
+      className="h-full"
+      bar={
+        <span className="ml-2 truncate text-[12px] text-white/40">
+          <span className="tnum text-white/60">{String(step).padStart(2, "0")}</span> · {title}
         </span>
-      </div>
-      <div className="flex-1 px-4 py-3.5">
-        <CommandLine cmd={cmd} output={output} note={note} />
-      </div>
-    </div>
+      }
+    >
+      <CommandLine cmd={cmd} output={output} note={note} />
+    </Terminal>
   );
 }

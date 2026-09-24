@@ -3,7 +3,7 @@ import { LoopSteps } from "@/components/home/loop-steps";
 import { InstallBox } from "@/components/site/install-box";
 import { Reveal } from "@/components/site/interactive";
 import { Eyebrow, GUTTER, RuleCard, Section, StatusLabel } from "@/components/site/primitives";
-import { ShellCard } from "@/components/site/terminal";
+import { ShellCard, Terminal } from "@/components/site/terminal";
 import { claims, firstSteps, layers, measured, providers, timeline } from "@/lib/content";
 
 /* ── the numbers ──────────────────────────────────────────────── */
@@ -176,37 +176,31 @@ export function BoundarySection() {
         ))}
       </div>
 
-      <div className="mt-10 overflow-x-auto border border-rule bg-term px-6 py-6">
-        <pre className="m-0 font-mono text-[13px] leading-[1.95] text-ink">
+      {/* Tau draws its own split in the same box ("tau — design split"); the
+          arrows here are measured from the imports, not copied from Tau's,
+          because omega_ai imports omega_agent and not the other way round. */}
+      <Terminal title="omega — design split" className="mt-10" bodyClassName="px-6 py-5">
+        <pre className="m-0 overflow-x-auto font-mono text-[13px] leading-[1.9]">
           <code>
-            <span className="text-ink-muted">omega — design split</span>
-            {"\n\n"}
-            <span className="text-oxblood">Harness</span>
-            {`         reusable agent brain
+            <span className="text-shell-key">Harness</span>
+            {`        = reusable agent brain
 `}
-            <span className="text-oxblood">build_tools()</span>
-            {`   coding-agent environment
+            <span className="text-shell-key">build_tools()</span>
+            {`  = coding-agent environment
 `}
-            <span className="text-oxblood">cli · headless</span>
-            {`  two entry points
+            <span className="text-shell-key">cli · headless</span>
+            {` = two entry points
 
 `}
-            <span className="text-ink-muted">dependency direction — who imports whom</span>
-            {"\n"}
-            {`omega_coding `}
-            <span className="text-forest">&#8594;</span>
-            {` omega_ai `}
-            <span className="text-forest">&#8594;</span>
-            {` omega_agent`}
-            {"\n"}
-            {`omega_coding `}
-            <span className="text-forest">&#8594;</span>
-            {` omega_agent`}
-            {"\n"}
-            <span className="text-ink-muted">omega_agent imports neither — tests/test_layers.py fails if it does</span>
+            <span className="text-shell-dim">dependency direction — who imports whom</span>
+            {`
+omega_coding → omega_ai → omega_agent
+omega_coding → omega_agent
+`}
+            <span className="text-shell-dim">omega_agent imports neither — tests/test_layers.py fails if it does</span>
           </code>
         </pre>
-      </div>
+      </Terminal>
     </Section>
   );
 }
