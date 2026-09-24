@@ -176,8 +176,11 @@ The starting point: a single script with three tools (`read_file`, `write_file`,
 that is exactly what makes it misleading: every one of the nine failures above is still in it.
 
 ```bash
-uv run agent.py   # from the repository root, with ANTHROPIC_API_KEY in .env — see .env.sample
+# from the repository root, with ANTHROPIC_API_KEY in .env — see .env.sample
+uv run --with anthropic --with python-dotenv agent.py
 ```
+
+It is a lone script, not a project, so `--with` brings its two dependencies along for the run.
 
 The even smaller teaching version — seventy lines, and the nine ways it breaks — is in
 [`02-beginner.md`](dev-notes/03-architecture/02-beginner.md).
