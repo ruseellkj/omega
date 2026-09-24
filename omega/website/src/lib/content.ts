@@ -39,7 +39,86 @@ export const thesis =
  * script bootstraps `uv`, installs omega in an isolated environment, verifies
  * the command it created, and never edits a shell rc file.
  */
-export const install = "curl -fsSL https://omega-agent.vercel.app/install.sh | sh";
+export const install = "curl -fsSL https://omega-coding-agent.vercel.app/install.sh | sh";
+
+/**
+ * The install box's tabs. Pi's landing page offers five ways in; omega has
+ * three that actually work today, and each was run end to end into an empty
+ * tool directory before it went on the page — `omega --version` answered
+ * `omega 0.1.0` from all three.
+ *
+ * There is no `pip install` tab, because nothing is on PyPI yet. `uv` is the
+ * install the script itself runs; `source` is one line, joined with `&&`, so
+ * the copy button hands over something pasteable rather than four prompts.
+ */
+export const installMethods = [
+  {
+    id: "curl",
+    label: "curl",
+    cmd: install,
+    note: "Installs uv if it is missing, then omega. Never edits a shell rc file.",
+  },
+  {
+    id: "uv",
+    label: "uv",
+    cmd: 'uv tool install "git+https://github.com/ruseellkj/omega#subdirectory=omega"',
+    note: "Already have uv? This is the install the script runs.",
+  },
+  {
+    id: "source",
+    label: "source",
+    cmd: "git clone https://github.com/ruseellkj/omega.git && cd omega/omega && uv sync && uv run omega",
+    note: "To read it, or change it. The package lives in the omega/ folder.",
+  },
+] as const;
+
+/**
+ * The home page's first steps, one small terminal each.
+ *
+ * Every `output` line was printed by the real program — the installer's closing
+ * lines, the terminal UI's empty prompt, the `--fake` banner, the pytest
+ * summary — not written for the page. A step whose real output depends on your
+ * key, repository or model shows none, rather than a plausible one.
+ */
+export const firstSteps: readonly {
+  title: string;
+  cmd: string;
+  output?: readonly string[];
+  note?: string;
+}[] = [
+  {
+    title: "Install",
+    cmd: install,
+    output: ["omega 0.1.0", "omega is installed.  Run:  omega"],
+  },
+  {
+    title: "Open it, then sign in",
+    cmd: "omega",
+    output: ["❯ Ask anything, or / for commands"],
+    note: "Type /login — a Claude or ChatGPT subscription in the browser, or an API key.",
+  },
+  {
+    title: "Try it with no key",
+    cmd: "omega --fake",
+    output: ["omega (fake provider - scripted responses, nothing is sent anywhere)"],
+  },
+  {
+    title: "One shot, pipeable",
+    cmd: 'omega -p "fix the failing test"',
+    note: "The answer goes to stdout, then it exits.",
+  },
+  {
+    title: "Pick up where you left off",
+    cmd: "omega -c",
+    note: "Continues the most recent session for this project. omega --sessions lists them all.",
+  },
+  {
+    title: "Run the tests yourself",
+    cmd: "cd omega/omega && uv run pytest -q",
+    output: ["713 passed in 35.81s"],
+    note: "From a clone. No key, no network.",
+  },
+];
 
 /**
  * README.md, "Run it". Chosen before the conversation starts.
@@ -170,7 +249,7 @@ export const timeline = [
   },
   {
     tier: "Beyond the tiers",
-    status: "next" as const,
+    status: "shipped" as const,
     headline: "Installable, and signed in to.",
     body: "A curl installer, CI and a release workflow. /login signs in with a Claude or ChatGPT subscription in the browser, or stores an API key in a 0600 file. The model list refreshes from models.dev. Nothing is on PyPI yet — the release workflow waits on the name being claimed.",
   },

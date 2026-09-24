@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
-import { Reveal } from "@/components/site/interactive";
+import { CopyButton, Reveal } from "@/components/site/interactive";
 import { ExternalArrow, GUTTER, PageHeader } from "@/components/site/primitives";
+import { CommandLine, Terminal } from "@/components/site/terminal";
 import { releases, site } from "@/lib/content";
 
 export const metadata: Metadata = {
@@ -44,7 +45,7 @@ export default function ReleasesPage() {
           <p className="m-0 max-w-[62ch] text-ink-muted">
             <span className="text-ink">omega is not on PyPI yet.</span> There is no{" "}
             <code className="font-mono text-sm">pip install</code> and nothing on any index. The{" "}
-            <code className="font-mono text-sm">curl … | sh</code> installer on the docs page installs
+            <code className="font-mono text-sm">curl … | sh</code> installer on the home page installs
             straight from this repository instead, and the PyPI release workflow is written and waits
             on the name being claimed — the mechanics are in{" "}
             <a
@@ -56,6 +57,16 @@ export default function ReleasesPage() {
             </a>
             .
           </p>
+          {/* How to actually use a tag: every row below has its own checkout
+              line, and this is the one command they all assume. */}
+          <div className="mt-6 max-w-2xl">
+            <Terminal title="read the code at any tag">
+              <CommandLine
+                cmd={`git clone ${site.repo}.git && cd omega`}
+                note="Then check out any tag below. Each row was measured from that tag, so what you see matches it."
+              />
+            </Terminal>
+          </div>
         </div>
       </Reveal>
 
@@ -91,6 +102,12 @@ export default function ReleasesPage() {
                       <span className="label text-xs text-ink-muted">{stat.label}</span>
                     </span>
                   ))}
+                  <span className="flex items-center gap-1.5">
+                    <code className="rounded-[3px] bg-term px-1.5 py-0.5 font-mono text-[12.5px] text-ink">
+                      git checkout {release.tag}
+                    </code>
+                    <CopyButton value={`git checkout ${release.tag}`} iconOnly className="px-1.5 py-1" />
+                  </span>
                   <a
                     href={`${site.repo}/tree/${release.tag}`}
                     className="label group cursor-pointer text-xs text-ink-muted no-underline transition-colors duration-200 hover:text-oxblood"

@@ -1,5 +1,95 @@
-import { Eyebrow, RuleCard, Section, StatusLabel } from "@/components/site/primitives";
-import { claims, layers, providers, timeline } from "@/lib/content";
+import Link from "next/link";
+import { LoopSteps } from "@/components/home/loop-steps";
+import { InstallBox } from "@/components/site/install-box";
+import { Reveal } from "@/components/site/interactive";
+import { Eyebrow, GUTTER, RuleCard, Section, StatusLabel } from "@/components/site/primitives";
+import { ShellCard } from "@/components/site/terminal";
+import { claims, firstSteps, layers, measured, providers, timeline } from "@/lib/content";
+
+/* ── the numbers ──────────────────────────────────────────────── */
+
+const today = (label: string) => measured.find((m) => m.label === label)?.today ?? "—";
+
+/**
+ * Four measured figures, set large, directly under the hero.
+ *
+ * Tau runs a strip like this under its hero (`.strip` in
+ * research/tau/website/layouts/index.html:40). Here every figure is a
+ * measurement rather than a verb — read from the same `measured` rows the
+ * lessons table uses, so the two pages cannot disagree.
+ *
+ * The hairlines are the grid's 1px gap showing the rule colour through, so
+ * they land between cells at every column count without per-cell border logic.
+ */
+const NUMBERS = [
+  { value: today("loop.py"), label: "lines in the loop", note: "loop.py, capped at 250" },
+  { value: today("Tests"), label: "tests, all offline", note: "no key, no network" },
+  { value: today("Source lines"), label: "lines of source", note: "small enough to read" },
+  { value: "3", label: "packages, one rule", note: "enforced by a test" },
+] as const;
+
+export function Numbers() {
+  return (
+    <section className={`border-b border-rule ${GUTTER}`}>
+      <Reveal>
+        <dl className="m-0 grid grid-cols-2 gap-px bg-rule md:grid-cols-4">
+          {NUMBERS.map((n) => (
+            <div key={n.label} className="flex flex-col bg-paper px-1 py-8 sm:px-5 md:py-10">
+              {/* dt first for the markup, the figure first on screen. */}
+              <dt className="label order-2 mt-3 text-oxblood">{n.label}</dt>
+              <dd className="tnum order-1 m-0 font-serif text-4xl leading-none text-ink md:text-5xl">
+                {n.value}
+              </dd>
+              <dd className="order-3 m-0 mt-1 text-sm text-ink-muted">{n.note}</dd>
+            </div>
+          ))}
+        </dl>
+      </Reveal>
+    </section>
+  );
+}
+
+/* ── get started ──────────────────────────────────────────────── */
+
+/**
+ * The commands, as small terminals you can copy from.
+ *
+ * Until this section the only commands on the home page were a list of flags
+ * in the hero — readable, not copyable, and in no order. These are in the order
+ * you would need them, and each output line is one the real program printed.
+ */
+export function GetStarted() {
+  return (
+    <Section>
+      <Eyebrow>get started</Eyebrow>
+      <div className="grid gap-x-12 gap-y-4 md:grid-cols-12 md:items-end">
+        <h2 className="m-0 max-w-[22ch] text-3xl md:col-span-7 md:text-[2.5rem] md:leading-[1.15]">
+          Six commands. Copy the one you need.
+        </h2>
+        <p className="m-0 max-w-[44ch] text-ink-muted md:col-span-5">
+          Install once, then <code className="font-mono text-[0.9em] text-oxblood">omega</code> is
+          the whole command. The rest are for scripts, for trying it without a key, and for reading
+          the code.
+        </p>
+      </div>
+
+      <ol className="m-0 mt-10 grid list-none gap-4 p-0 sm:grid-cols-2 lg:grid-cols-3">
+        {firstSteps.map((s, i) => (
+          <li key={s.title} className="min-w-0">
+            <ShellCard step={i + 1} title={s.title} cmd={s.cmd} output={s.output} note={s.note} />
+          </li>
+        ))}
+      </ol>
+
+      <Link
+        href="/docs"
+        className="label mt-8 inline-block cursor-pointer border-b border-rule-strong pb-0.5 text-ink transition-colors duration-200 hover:border-oxblood hover:text-oxblood"
+      >
+        Every flag, key and command
+      </Link>
+    </Section>
+  );
+}
 
 /* ── the loop ─────────────────────────────────────────────────── */
 
@@ -25,18 +115,7 @@ export function Loop() {
       </h2>
 
       <div className="mt-10">
-        <ol className="m-0 grid list-none border border-rule bg-paper-raised p-0 md:grid-cols-4">
-          {STEPS.map((s, i) => (
-            <li
-              key={s.label}
-              className="border-b border-rule px-6 py-7 last:border-b-0 md:border-b-0 md:border-r md:last:border-r-0"
-            >
-              <span className="tnum label text-oxblood">{String(i + 1).padStart(2, "0")}</span>
-              <h3 className="m-0 mt-3 text-xl">{s.label}</h3>
-              <p className="m-0 mt-1.5 text-sm text-ink-muted">{s.detail}</p>
-            </li>
-          ))}
-        </ol>
+        <LoopSteps steps={STEPS} />
 
         <div className="flex flex-col gap-2 border-x border-b border-rule px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
           <span className="flex items-baseline gap-2.5 text-sm text-ink-muted">
@@ -83,7 +162,8 @@ export function BoundarySection() {
         Separate the brain, the environment, and the face.
       </h2>
       <p className="mt-5 max-w-[56ch] text-lg text-ink-muted">
-        Each one is a package, and each is defined as much by what it is forbidden to know.
+        The brain is a package of its own; the environment and the face sit above it. Each is
+        defined as much by what it is forbidden to know.
       </p>
 
       <div className="mt-10 grid gap-x-10 gap-y-8 md:grid-cols-3">
@@ -111,13 +191,19 @@ export function BoundarySection() {
             {`  two entry points
 
 `}
-            <span className="text-ink-muted">dependency direction</span>
+            <span className="text-ink-muted">dependency direction — who imports whom</span>
             {"\n"}
             {`omega_coding `}
             <span className="text-forest">&#8594;</span>
-            {` omega_agent `}
+            {` omega_ai `}
             <span className="text-forest">&#8594;</span>
-            {` omega_ai`}
+            {` omega_agent`}
+            {"\n"}
+            {`omega_coding `}
+            <span className="text-forest">&#8594;</span>
+            {` omega_agent`}
+            {"\n"}
+            <span className="text-ink-muted">omega_agent imports neither — tests/test_layers.py fails if it does</span>
           </code>
         </pre>
       </div>
@@ -258,7 +344,7 @@ const ORIGINS = [
 
 export function Origin() {
   return (
-    <Section last>
+    <Section>
       <Eyebrow>the origin</Eyebrow>
       <h2 className="m-0 max-w-[26ch] text-3xl md:text-[2.5rem] md:leading-[1.15]">
         Inspired by Pi and Tau, written as a Python learning path.
@@ -283,6 +369,47 @@ export function Origin() {
             <span className="label mt-3 inline-block text-ink-muted">{o.host}</span>
           </a>
         ))}
+      </div>
+    </Section>
+  );
+}
+
+/* ── the close ────────────────────────────────────────────────── */
+
+/**
+ * The install box again, at the bottom, where a reader who scrolled the whole
+ * page arrives having decided. Tau closes the same way (the `closing` section
+ * of research/tau/website/layouts/index.html). No second big Ω here: the footer
+ * directly below already sets one at full size.
+ */
+export function Closing() {
+  return (
+    <Section last className="pt-20">
+      <div className="mx-auto max-w-2xl text-center">
+        <Eyebrow>start here</Eyebrow>
+        <h2 className="m-0 text-3xl md:text-[2.5rem] md:leading-[1.15]">
+          Read it end to end. Then run it.
+        </h2>
+        <p className="mx-auto mt-4 max-w-[46ch] text-lg text-ink-muted">
+          One line installs it, and{" "}
+          <code className="font-mono text-[0.9em] text-oxblood">omega --fake</code> needs no key, no
+          network and no credits.
+        </p>
+        <InstallBox className="mx-auto mt-9 max-w-xl text-left" />
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
+          <Link
+            href="/docs"
+            className="label cursor-pointer border-b border-oxblood pb-0.5 text-oxblood transition-colors duration-200 hover:border-ink hover:text-ink"
+          >
+            Read the docs →
+          </Link>
+          <Link
+            href="/roadmap"
+            className="label cursor-pointer border-b border-rule-strong pb-0.5 text-ink transition-colors duration-200 hover:border-oxblood hover:text-oxblood"
+          >
+            The roadmap
+          </Link>
+        </div>
       </div>
     </Section>
   );

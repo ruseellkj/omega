@@ -1,7 +1,9 @@
-import { CopyCommand, Reveal } from "@/components/site/interactive";
-import { GUTTER } from "@/components/site/primitives";
-import { Terminal, TerminalCommand } from "@/components/site/terminal";
-import { commands, site } from "@/lib/content";
+import Link from "next/link";
+import { SessionReplay } from "@/components/home/session-replay";
+import { Reveal } from "@/components/site/interactive";
+import { InstallBox } from "@/components/site/install-box";
+import { ExternalArrow, GUTTER } from "@/components/site/primitives";
+import { site } from "@/lib/content";
 
 /**
  * Graph paper across the hero, easing off only at the very end.
@@ -27,15 +29,26 @@ function GridPaper() {
   );
 }
 
-/** The one split layout on the site. Every other section has its own shape. */
+/**
+ * The one split layout on the site. Every other section has its own shape.
+ *
+ * Left: what it is, and the install command — where both references put it,
+ * because the hero is the one place every visitor reads. Right: the program
+ * itself, running. The old right column was a list of flags, which told you
+ * omega has a command line and showed nothing of what using it is like.
+ *
+ * The split starts at `lg`, not `md`. The replay needs ~50 terminal columns for
+ * the wordmark, and half of a 768px screen is narrower than that; stacked, it
+ * gets the full width instead of a squeezed half.
+ */
 export function Hero() {
   return (
-    <section className={`relative overflow-hidden border-b border-rule py-16 md:py-20 ${GUTTER}`}>
+    <section className={`relative overflow-hidden border-b border-rule py-14 md:py-20 ${GUTTER}`}>
       <GridPaper />
 
       <Reveal className="relative">
-        <div className="grid items-center gap-x-12 gap-y-12 md:grid-cols-12">
-          <div className="min-w-0 md:col-span-6 md:pl-5">
+        <div className="grid items-center gap-x-12 gap-y-12 lg:grid-cols-12">
+          <div className="min-w-0 lg:col-span-5">
             <h1 className="m-0 max-w-[16ch] text-4xl leading-[1.08] md:text-[3.25rem]">
               {site.tagline}
             </h1>
@@ -50,39 +63,27 @@ export function Hero() {
               <span className="text-ink">{site.headline}</span> {site.headlineRest}
             </p>
 
-            <div className="mt-9 flex flex-wrap items-center gap-3">
-              {/* The command is wider than a phone; it scrolls inside its own
-                  box rather than pushing the page sideways. */}
-              <code className="max-w-full overflow-x-auto whitespace-nowrap border border-rule bg-paper-raised px-3.5 py-2 font-mono text-[12px] sm:text-[13px]">
-                git clone {site.repo.replace("https://", "")}
-              </code>
-              <CopyCommand value={`git clone ${site.repo}.git`} />
+            <InstallBox className="mt-9" />
+
+            <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3">
+              <Link
+                href="/docs"
+                className="label cursor-pointer border-b border-oxblood pb-0.5 text-oxblood transition-colors duration-200 hover:border-ink hover:text-ink"
+              >
+                Read the docs →
+              </Link>
               <a
                 href={site.repo}
                 className="label cursor-pointer border-b border-rule-strong pb-0.5 text-ink transition-colors duration-200 hover:border-oxblood hover:text-oxblood"
               >
-                GitHub
+                Source on GitHub
+                <ExternalArrow className="ml-1.5" />
               </a>
             </div>
-
-            <p className="mt-5 text-sm text-ink-muted">
-              One line installs it — see the docs. Or clone it and run it.
-            </p>
           </div>
 
-          <div className="min-w-0 md:col-span-6 min-[1152px]:-ml-[23px] min-[1152px]:mr-[13px]">
-            <Terminal>
-              {commands.map((c) => (
-                <TerminalCommand key={c.cmd} cmd={c.cmd} note={c.note} />
-              ))}
-              <div className="mt-3 whitespace-pre border-t border-rule pt-3">
-                <span className="text-oxblood">$ </span>
-                <span>uv run pytest -q</span>
-                {"\n"}
-                <span className="text-forest">{"  "}713 passed</span>
-                <span className="text-ink-muted"> in 34.82s</span>
-              </div>
-            </Terminal>
+          <div className="min-w-0 lg:col-span-7">
+            <SessionReplay />
           </div>
         </div>
       </Reveal>

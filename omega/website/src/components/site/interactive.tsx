@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 
 /**
- * The page's only two client islands. Everything else renders on the server.
+ * Small client islands shared across pages: the scroll reveal and the copy
+ * button. Everything else renders on the server.
  */
 
 /**
@@ -69,35 +70,123 @@ export function Reveal({
 }
 
 /**
- * Copy a shell command. The label states what happened rather than apologising
- * for what did not — and it reverts, so the control is never left lying.
+ * Put text on the clipboard, or say it could not.
+ *
+ * `navigator.clipboard` exists only in a secure context, so a page opened over
+ * plain http on a LAN address has none. The hidden-textarea fallback is the
+ * pre-Clipboard-API route and still works there. Deprecated is not the same as
+ * gone, and a copy button that silently does nothing is the worst outcome.
  */
-export function CopyCommand({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false);
+async function writeClipboard(value: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    // fall through to the textarea route
+  }
+  try {
+    const area = document.createElement("textarea");
+    area.value = value;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(area);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/*
+ * Lucide's `copy` and `check` (lucide-react@1.34.0, ISC), inlined for the same
+ * reason as ExternalArrow in primitives.tsx: a few paths do not need the
+ * package in the bundle, and a path cannot fall back to the wrong font.
+ */
+function CopyGlyph() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="size-3.5 shrink-0">
+      <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+    </svg>
+  );
+}
+
+function CheckGlyph() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" className="size-3.5 shrink-0">
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
+const COPY_TONES = {
+  /** On paper: the site's hairline-and-oxblood control. */
+  paper:
+    "border border-rule bg-paper-raised text-ink-muted hover:border-oxblood hover:bg-paper-raised hover:text-oxblood",
+  /** Inside a night terminal: the same control in the TUI's colours. */
+  night:
+    "border border-night-rule bg-night-raised text-night-muted hover:border-night-accent hover:bg-night-raised hover:text-night-ink",
+  /** A primary action — the install box, where copying *is* the point. */
+  accent:
+    "border border-night-accent bg-night-accent text-night hover:bg-night-ink hover:border-night-ink hover:text-night",
+} as const;
+
+/**
+ * Copy a shell command. The label states what happened rather than apologising
+ * for what did not, and it reverts, so the control is never left lying.
+ *
+ * `value` is the command alone. The `$ ` a terminal box draws is decoration,
+ * and a copy that included it would paste a command the shell rejects.
+ *
+ * `iconOnly` is for the per-line buttons inside a terminal, where a word on
+ * every row would drown the commands. It keeps an accessible name; only the
+ * visible label goes.
+ */
+export function CopyButton({
+  value,
+  tone = "paper",
+  iconOnly = false,
+  label = "Copy",
+  className = "",
+}: {
+  value: string;
+  tone?: keyof typeof COPY_TONES;
+  iconOnly?: boolean;
+  label?: string;
+  className?: string;
+}) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
 
   useEffect(() => {
-    if (!copied) return;
-    const timer = window.setTimeout(() => setCopied(false), 2000);
+    if (state === "idle") return;
+    const timer = window.setTimeout(() => setState("idle"), 1800);
     return () => window.clearTimeout(timer);
-  }, [copied]);
+  }, [state]);
 
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
+    setState((await writeClipboard(value)) ? "copied" : "failed");
   }
+
+  const word = state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : label;
 
   return (
     <Button
       type="button"
       onClick={copy}
       variant="ghost"
-      className="label h-auto cursor-pointer rounded-none border border-rule bg-paper-raised px-3 py-1.5 text-ink-muted hover:border-oxblood hover:bg-paper-raised hover:text-oxblood"
+      aria-label={iconOnly ? `${label}: ${value}` : undefined}
+      title={iconOnly ? `${label} command` : undefined}
+      className={`label h-auto shrink-0 cursor-pointer gap-1.5 rounded-sm px-2.5 py-1.5 transition-colors duration-200 ${COPY_TONES[tone]} ${className}`}
     >
-      <span aria-live="polite">{copied ? "Copied" : "Copy"}</span>
+      {state === "copied" ? <CheckGlyph /> : <CopyGlyph />}
+      <span aria-live="polite" className={iconOnly ? "sr-only" : ""}>
+        {word}
+      </span>
     </Button>
   );
 }

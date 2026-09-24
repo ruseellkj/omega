@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { InstallBox } from "@/components/site/install-box";
 import { Reveal } from "@/components/site/interactive";
 import { ExternalArrow, GUTTER, PageHeader } from "@/components/site/primitives";
-import { install, keys, sessionCommands, site } from "@/lib/content";
+import { CommandLine, Terminal } from "@/components/site/terminal";
+import { commands, keys, sessionCommands, site } from "@/lib/content";
 
 export const metadata: Metadata = {
   title: "Docs — omega",
@@ -42,7 +44,7 @@ const SECTIONS: { title: string; lede: string; items: Item[] }[] = [
         name: "Quickstart",
         href: `${BLOB}/README.md`,
         where: "README.md",
-        note: "Clone it and run it. `uv run omega --fake` needs no key, no network and no credits.",
+        note: "One line to install, or clone it and run it. `omega --fake` needs no key, no network and no credits.",
       },
     ],
   },
@@ -289,23 +291,42 @@ export default function DocsPage() {
             <div className="md:col-span-3">
               <h2 className="label m-0 text-oxblood">Install</h2>
               <p className="m-0 mt-2.5 max-w-[28ch] text-sm text-ink-muted">
-                Bootstraps <code className="font-mono">uv</code>, installs omega in its own
-                environment, and never edits a shell rc file.
+                Three routes, each run end to end before it went on this page. Nothing is on PyPI
+                yet, so there is no <code className="font-mono">pip install</code>.
               </p>
             </div>
             {/* `min-w-0` because a grid item will not shrink below its content by
                 default, and the install command is one unbreakable line: without it
-                the column widens past a phone screen instead of letting the <pre>
-                scroll. Same fix as the hero's terminal column. */}
+                the column widens past a phone screen instead of letting the command
+                scroll. Same fix as the hero's columns. */}
             <div className="min-w-0 md:col-span-9">
-              <pre className="m-0 overflow-x-auto rounded-sm border-2 border-rule-strong bg-term-bg p-4">
-                <code className="font-mono text-sm text-ink">{install}</code>
-              </pre>
+              <InstallBox />
               <p className="m-0 mt-3 text-sm text-ink-muted">
                 Then <code className="font-mono text-oxblood">omega</code> — no provider flag.
                 It uses whichever provider you are signed in to, and{" "}
                 <code className="font-mono text-oxblood">/login</code> is how you sign in.
               </p>
+            </div>
+          </div>
+        </Reveal>
+
+        {/* The flags, as a terminal you can copy from. They were only on the
+            home page before, as a list you could read and not copy. */}
+        <Reveal>
+          <div className="grid gap-x-12 gap-y-6 border-t-2 border-rule-strong pt-7 md:grid-cols-12">
+            <div className="md:col-span-3">
+              <h2 className="label m-0 text-oxblood">Run it</h2>
+              <p className="m-0 mt-2.5 max-w-[28ch] text-sm text-ink-muted">
+                Chosen before the conversation starts. The first is the whole command; the rest are
+                for scripts, for trying it without a key, and for coming back.
+              </p>
+            </div>
+            <div className="min-w-0 md:col-span-9">
+              <Terminal title="your shell">
+                {commands.map((c) => (
+                  <CommandLine key={c.cmd} cmd={c.cmd} note={c.note} />
+                ))}
+              </Terminal>
             </div>
           </div>
         </Reveal>
@@ -323,8 +344,10 @@ export default function DocsPage() {
             </div>
             <ul className="m-0 grid list-none gap-x-10 gap-y-2.5 p-0 sm:grid-cols-2 md:col-span-9">
               {keys.map((k) => (
-                <li key={k.key} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-                  <code className="font-mono text-sm text-oxblood">{k.key}</code>
+                <li key={k.key} className="grid grid-cols-[4.25rem_minmax(0,1fr)] items-baseline gap-x-3">
+                  <kbd className="justify-self-start rounded-[3px] border border-b-2 border-rule-strong bg-paper-raised px-1.5 py-0.5 font-mono text-[12.5px] text-oxblood">
+                    {k.key}
+                  </kbd>
                   <span className="text-sm text-ink-muted">{k.note}</span>
                 </li>
               ))}
@@ -332,9 +355,9 @@ export default function DocsPage() {
           </div>
         </Reveal>
 
-        {/* The in-session commands, spelled out rather than linked. They are the
-            newest thing omega has and the least discoverable — there is no
-            autocomplete to find them with. */}
+        {/* The in-session commands, spelled out rather than linked. Typing /
+            in the terminal UI lists them too, but only once you are inside —
+            this is the list for deciding whether to install. */}
         <Reveal>
           <div className="grid gap-x-12 gap-y-6 border-t-2 border-rule-strong pt-7 md:grid-cols-12">
             <div className="md:col-span-3">
@@ -345,10 +368,12 @@ export default function DocsPage() {
                 the model.
               </p>
             </div>
-            <ul className="m-0 grid list-none gap-x-10 gap-y-2.5 p-0 sm:grid-cols-2 md:col-span-9">
+            <ul className="m-0 grid list-none gap-x-10 gap-y-4 p-0 sm:grid-cols-2 md:col-span-9">
               {sessionCommands.map((c) => (
-                <li key={c.cmd} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-                  <code className="font-mono text-sm text-oxblood">{c.cmd}</code>
+                <li key={c.cmd} className="grid content-start gap-y-1">
+                  <code className="justify-self-start rounded-[3px] bg-term px-1.5 py-0.5 font-mono text-[13px] text-oxblood">
+                    {c.cmd}
+                  </code>
                   <span className="text-sm text-ink-muted">{c.note}</span>
                 </li>
               ))}
