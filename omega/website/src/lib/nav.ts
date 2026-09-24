@@ -9,11 +9,11 @@ import { site } from "@/lib/content";
  * rant second, so the first thing after the manual was an argument.
  */
 export const NAV = [
-  { label: "Rant", href: "/rant" },
   { label: "Docs", href: "/docs" },
-  { label: "Lessons", href: "/lessons" },
-  { label: "Releases", href: "/releases" },
   { label: "Roadmap", href: "/roadmap" },
+  { label: "Releases", href: "/releases" },
+  { label: "Lessons", href: "/lessons" },
+  { label: "Rant", href: "/rant" },
 ] as const;
 
 /** Off-site links. Kept apart from NAV so both surfaces can set them off. */
