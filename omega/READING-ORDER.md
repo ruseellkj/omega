@@ -76,9 +76,9 @@ neither imports it.
 | 26 | `context.py` | 187 | How full the context window is. Measures the problem `compact.py` fixes. |
 | 26b | `eventlog.py` | 160 | **Tier 3.** The second listener. Writes assembled messages, never deltas. |
 | 26c | `subagent.py` | 185 | **Tier 3.** A nested agent, as a tool calling `run_headless`. |
-| 26d | `tui/state.py` | 241 | **Tier 3.** What the screen shows. Imports no Textual. |
+| 26d | `tui/state.py` | 299 | **Tier 3.** What the screen shows. Imports no Textual. `load_messages` redraws a stored session, and is tested against a live turn rather than a list. |
 | 26e | `tui/adapter.py` | 130 | **Tier 3.** The 10 agent events -> screen state. |
-| 26f | `tui/app.py` | 1,051 | **Tier 3.** The screen. Steering becomes typeable here. Read "Copying and pasting" for why `ctrl+c` copies before it stops. |
+| 26f | `tui/app.py` | 1,102 | **Tier 3.** The screen. Steering becomes typeable here. Read "Copying and pasting" for why `ctrl+c` copies before it stops. |
 | 26g | `session/tree.py` | 101 | **Tier 3.** The transcript is a tree. `path_to`, `leaves`, cycle detection. |
 | 26a | `compact.py` | 377 | **Tier 3.** Fills `transform_context`. Cuts on turn boundaries so a tool call is never orphaned. |
 | 27 | `cost.py` | 123 | What the run cost. Read why it ships **no price table**. |

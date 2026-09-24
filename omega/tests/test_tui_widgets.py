@@ -23,9 +23,12 @@ from textual.widgets.input import Selection
 from conftest import RecordingClipboard  # the suite's own conftest
 from omega_agent.agent_events import AgentStartEvent, ToolExecutionStartEvent
 from omega_agent.harness import Harness
+from omega_agent.session import JsonlSessionStore
 from omega_agent.types import ToolCall
 from omega_ai.fake import FakeProvider, text_turn, tool_turn
 from omega_coding.builtin_tools import build_tools
+from omega_coding.commands import CommandContext
+from omega_coding.cost import CostTracker
 from omega_coding.status import FRAMES
 from omega_coding.tui import banner, themes
 from omega_coding.tui.app import OmegaApp
@@ -262,6 +265,175 @@ async def test_an_unknown_theme_says_so_instead_of_crashing(tmp_path: Path) -> N
 
         assert app.state.rows[-1].is_error
         assert "nope" in app.state.rows[-1].text
+
+
+def _app_with_commands(tmp_path: Path, provider: Any = None) -> OmegaApp:
+    """Like `_app`, but wired for `/` commands that need `context.harness` and
+    `context.store` — `/clear` among them, which `dispatch` refuses to touch
+    without a `CommandContext`."""
+    store = JsonlSessionStore(tmp_path, home=tmp_path)
+    harness = Harness(
+        provider=provider if provider is not None else FakeProvider([text_turn("ok")] * 20),
+        model="m",
+        system="s",
+        tools=build_tools(tmp_path),
+        store=store,
+    )
+    context = CommandContext(
+        harness=harness,
+        store=store,
+        tracker=CostTracker(),
+        model="m",
+        system="s",
+        tools=build_tools(tmp_path),
+        hooks=harness.hooks,
+    )
+    return OmegaApp(harness, context=context)
+
+
+async def test_clear_empties_the_transcript_on_screen(tmp_path: Path) -> None:
+    """**The reported bug:** `/clear` started a fresh session underneath, but the
+    old turns stayed on screen — `_run_command` only ever appends a notice row,
+    it never touches `state.rows`, so `/clear` looked like it did nothing.
+    """
+    app = _app_with_commands(tmp_path)
+    async with app.run_test() as pilot:
+        app.state.add("user", "hello")
+        app.state.add("assistant", "hi there")
+        app.refresh_view()
+        await pilot.pause()
+        assert len(app.query(TranscriptRow)) == 2
+
+        await app._run_command("/clear")
+        await pilot.pause()
+
+        # Only the "Cleared." notice should remain — the two old turns, on
+        # screen and in state alike, must be gone rather than just superseded.
+        assert not any(row.kind in ("user", "assistant") for row in app.state.rows)
+        shown = [str(row.render()) for row in app.query(TranscriptRow)]
+        assert not any("hello" in text or "hi there" in text for text in shown)
+        # The notice must not be drawn in the widget "hello" used to occupy:
+        # `refresh_view` updates rows in place by index, and `row-user` is a
+        # class set once at construction, so a reused widget kept your padding.
+        assert all("row-user" not in row.classes for row in app.query(TranscriptRow))
+
+
+async def _save_turns(harness: Harness, questions: int) -> str:
+    """Run real turns so a session exists on disk, and return its id."""
+    for number in range(questions):
+        async for _ in harness.run(f"question {number}"):
+            pass
+    assert harness.session_id is not None
+    return harness.session_id
+
+
+async def test_resume_puts_the_stored_conversation_on_screen(tmp_path: Path) -> None:
+    """**The reported bug:** `/resume` loaded the messages into the harness and
+    said how many there were, and the screen showed none of them — so you were
+    continuing a conversation you could not read.
+    """
+    app = _app_with_commands(tmp_path)
+    async with app.run_test() as pilot:
+        earlier = await _save_turns(app.harness, 12)
+        app.harness.start_new_session()
+        app.state.add("user", "a question from the session being left")
+        app.refresh_view()
+        await pilot.pause()
+
+        await app._run_command(f"/resume {earlier}")
+        # Longer than a bare pause: `scroll_end` lands after the layout pass for
+        # the rows just mounted. Measured: `scroll_y` is 0 on the next frame and
+        # at the bottom by 0.1s.
+        await pilot.pause(0.3)
+
+        shown = [str(row.render()) for row in app.query(TranscriptRow)]
+        assert sum("question" in text for text in shown) == 12, shown
+        assert not any("being left" in text for text in shown), "the old screen survived"
+        assert "Resumed" in shown[-1]
+
+        # Twelve turns do not fit in 24 rows. Scrolling is the pane's job; what
+        # this checks is that the rows are really in it, and that you land on
+        # the latest turn with the older ones above.
+        pane = app.query_one("#transcript", VerticalScroll)
+        assert pane.max_scroll_y > 0
+        assert pane.scroll_y == pane.max_scroll_y
+
+
+async def test_starting_on_a_resumed_session_shows_it(tmp_path: Path) -> None:
+    """`omega --resume <id>` and `--continue` resume in `cli.py`, before the app
+    exists, and print the count to a terminal the app then takes over. The app
+    has to draw what the harness already holds, or you start on a blank splash."""
+    store = JsonlSessionStore(tmp_path, home=tmp_path)
+    first = Harness(
+        provider=FakeProvider([text_turn("the earlier answer")]),
+        model="m",
+        system="s",
+        tools=[],
+        store=store,
+    )
+    earlier = await _save_turns(first, 1)
+    harness = Harness(provider=FakeProvider([]), model="m", system="s", tools=[], store=store)
+    harness.resume(earlier)
+
+    app = OmegaApp(harness)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        shown = [str(row.render()) for row in app.query(TranscriptRow)]
+        assert any("question 0" in text for text in shown)
+        assert any("the earlier answer" in text for text in shown)
+        assert not app.query(Splash)
+
+
+async def _ask(pilot: Any, app: OmegaApp, text: str, wait: float = 0.3) -> None:
+    app.query_one("Input").value = text  # type: ignore[attr-defined]
+    await pilot.press("enter")
+    await pilot.pause(wait)
+
+
+def _user_rows_on_screen(app: OmegaApp) -> list[str]:
+    return [str(row.render()) for row in app.query(TranscriptRow) if "row-user" in row.classes]
+
+
+async def test_rewind_takes_the_dropped_question_off_the_screen(tmp_path: Path) -> None:
+    """**Same bug as `/resume`, found while fixing it.** `/rewind` dropped the
+    last question from the harness and left it on screen, so the conversation
+    you could read was not the one the next turn would continue from."""
+    app = _app_with_commands(tmp_path)
+    async with app.run_test() as pilot:
+        for question in ("first", "second", "third"):
+            await _ask(pilot, app, question)
+        assert len(_user_rows_on_screen(app)) == 3
+
+        await app._run_command("/rewind")
+        await pilot.pause()
+
+        assert _user_rows_on_screen(app) == ["❯ first", "❯ second"]
+        assert "Rewound" in app.state.rows[-1].text
+
+
+async def test_commands_that_rewrite_the_conversation_wait_for_the_turn(tmp_path: Path) -> None:
+    """They change the conversation the running loop is still appending to.
+
+    Measured before the guard, for `/rewind` mid-turn: the question being
+    answered was cut, and its answer was saved anyway, leaving two assistant
+    messages in a row on disk. `/clear` and `/resume` would write the rest of
+    the turn into the *new* session. `/compact` is not here because the same
+    measurement found nothing wrong: the in-flight question and its answer
+    both survived.
+    """
+    app = _app_with_commands(tmp_path, _Slow(FakeProvider([text_turn("slow answer")])))
+    async with app.run_test() as pilot:
+        await _ask(pilot, app, "a long question")
+        assert app.state.running
+
+        for command in ("/clear", "/resume anything", "/rewind"):
+            await app._run_command(command)
+            assert app.state.rows[-1].is_error, command
+            assert command.split()[0] in app.state.rows[-1].text
+
+        await pilot.pause(2.0)
+        assert not app.state.running
+        assert [m.role for m in app.harness.messages] == ["user", "assistant"]
 
 
 # --------------------------------------------------------------- pasting

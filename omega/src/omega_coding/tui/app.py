@@ -307,6 +307,11 @@ class OmegaApp(App[None]):
             self.register_theme(_as_textual(theme))
         self.theme = self._theme.name
         self.query_one(PromptInput).focus()
+        if self.harness.messages:
+            # `--resume` and `--continue` load the session in `cli.py`, before
+            # this app exists, and print the count to a terminal it then covers.
+            self._reload_transcript()
+            self.refresh_view()
         if self._commands is not None:
             # The REPL's `getpass` asker cannot work here — Textual owns the
             # terminal — so it is replaced with a modal, exactly as the approval
@@ -381,6 +386,27 @@ class OmegaApp(App[None]):
         if not pane.screen.selections:
             pane.scroll_end(animate=False)
         self._refresh_status()
+
+    def _reload_transcript(self) -> None:
+        """Replace every row with the conversation the harness now holds.
+
+        **Widgets are thrown away, not reused.** `refresh_view` updates rows in
+        place by index, which is right when the transcript only grows at the
+        tail and wrong when all of it changes. A reused widget keeps the class it
+        was built with, so the "Cleared." notice was drawn with a user row's
+        padding. Rebuilding every row is the redraw the module docstring warns
+        against, and it is fine here, once per `/clear`, `/resume`, `/rewind` or
+        startup.
+
+        Deferred removal cannot cause a duplicate here, because rows carry no
+        ids. The `#header` guard in `refresh_view` exists for that problem.
+        """
+        for widget in self._rows:
+            widget.remove()
+        self._rows.clear()
+        self.state.rows = []
+        self.state.streaming = None
+        self.state.load_messages(self.harness.messages)
 
     def _refresh_status(self) -> None:
         """Drive the spinner from state.
@@ -498,12 +524,37 @@ class OmegaApp(App[None]):
             self.state.add("notice", "commands need a session; none was wired.", is_error=True)
             self.refresh_view()
             return
+        if name in ("/clear", "/resume", "/rewind") and self.state.running:
+            # Commands run beside a turn, not instead of it (see the worker
+            # group above), and these three rewrite the conversation that turn
+            # is still appending to. Measured for `/rewind`: the question being
+            # answered was cut and its answer saved anyway. `/compact` is left
+            # out because the same measurement found it harmless.
+            self.state.add(
+                "notice",
+                f"{name} waits for the turn to finish - ctrl+c stops it.",
+                is_error=True,
+            )
+            self.refresh_view()
+            return
 
+        session, count = self.harness.session_id, len(self.harness.messages)
         lines: list[str] = []
         # `replace` rather than rebuilding the context by hand: it is a frozen
         # dataclass, so this is the supported way to swap one field, and it
         # cannot go stale when the context grows another.
         outcome = await dispatch(text, replace(self._commands, emit=lines.append))
+        # These handlers change `harness.messages` and none can touch the
+        # screen, so it kept showing turns that were no longer the conversation.
+        # A failed `/resume` or an empty `/rewind` changes nothing, so the screen
+        # stays too. `/compact` is not here on purpose: it shrinks what the
+        # model sees, and says the full history is kept, so the screen keeps it.
+        if outcome == "handled" and (
+            name == "/clear"
+            or (name == "/resume" and self.harness.session_id != session)
+            or (name == "/rewind" and len(self.harness.messages) < count)
+        ):
+            self._reload_transcript()
         body = "\n".join(line for line in lines if line.strip())
         if body:
             self.state.add("notice", body)

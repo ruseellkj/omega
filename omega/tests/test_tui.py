@@ -38,7 +38,7 @@ from omega_agent.events import (
     ThinkingStartEvent,
 )
 from omega_agent.harness import Harness
-from omega_agent.types import AssistantMessage, ToolCall, ToolResultMessage, Usage
+from omega_agent.types import AssistantMessage, ToolCall, ToolResultMessage, Usage, UserMessage
 from omega_ai.fake import FakeProvider, text_turn, tool_turn
 from omega_coding.builtin_tools import build_tools
 from omega_coding.tui.adapter import TuiEventAdapter
@@ -245,6 +245,67 @@ def test_running_is_true_only_between_start_and_end() -> None:
 
     adapter.apply(AgentEndEvent(reason="stop"))
     assert state.running is False
+
+
+# ------------------------------------------------------------ a resumed session
+
+
+def _shape(state: TuiState) -> list[tuple[str, str, str, bool, bool]]:
+    return [(r.kind, r.text, r.output, r.is_error, r.running) for r in state.rows]
+
+
+async def test_a_resumed_session_shows_the_rows_its_live_turns_showed(tmp_path: Path) -> None:
+    """**The reported bug: resuming showed a message count and nothing else.**
+
+    The property is parity, not a hand-written expectation: whatever a live turn
+    drew, the same messages loaded from disk must draw again. A resumed screen
+    that looks different from the one you left is its own kind of confusing.
+    """
+    harness = Harness(
+        provider=FakeProvider(
+            [
+                tool_turn("run_shell", {"command": "echo one"}, text="Let me check."),
+                text_turn("All done."),
+            ]
+        ),
+        model="m",
+        system="s",
+        tools=build_tools(tmp_path),
+    )
+    live, adapter = _adapter()
+    # The app adds your row itself before the turn starts; the adapter never does.
+    live.add("user", "check it")
+    async for event in harness.run("check it"):
+        adapter.apply(event)
+
+    replayed = TuiState()
+    replayed.load_messages(harness.messages)
+
+    assert [row.kind for row in live.rows] == ["user", "assistant", "tool", "assistant"]
+    assert _shape(replayed) == _shape(live)
+
+
+def test_a_restored_failed_turn_says_what_the_live_one_said() -> None:
+    """A failed or cancelled turn ends with a notice (`agent_end`), and the reason
+    is on the stored assistant message (`loop.py:123`). Replaying without it would
+    make a turn that broke look like one that quietly said nothing."""
+    live, adapter = _adapter()
+    live.add("user", "hi")
+    adapter.apply(AgentEndEvent(reason="error", error_message="overloaded"))
+    live.add("user", "again")
+    adapter.apply(AgentEndEvent(reason="aborted", error_message="Cancelled"))
+
+    replayed = TuiState()
+    replayed.load_messages(
+        [
+            UserMessage(content="hi"),
+            AssistantMessage(stop_reason="error", error_message="overloaded"),
+            UserMessage(content="again"),
+            AssistantMessage(stop_reason="aborted", error_message="Cancelled"),
+        ]
+    )
+
+    assert _shape(replayed) == _shape(live)
 
 
 # --------------------------------------------------- the reason the TUI exists

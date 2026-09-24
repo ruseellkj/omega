@@ -26,8 +26,19 @@ start opens a row and the end fills it in, matched by `call_id`.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, Literal
+
+from omega_agent.types import (
+    AgentMessage,
+    AssistantMessage,
+    TextContent,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
+)
+from omega_coding.status import describe
 
 #: What a row is. `notice` covers cancellation, errors and the steering
 #: acknowledgement — anything omega says about itself rather than relaying.
@@ -176,6 +187,53 @@ class TuiState:
         self.rows.append(
             Row(kind="tool", text=label, call_id=call_id, output=output, is_error=is_error)
         )
+
+    # ---------------------------------------------------------- stored sessions
+
+    def load_messages(self, messages: Iterable[AgentMessage]) -> None:
+        """Draw a stored conversation: the rows its live turns drew, again.
+
+        **Parity with the adapter is the specification**, and the test for this
+        compares against a live turn rather than a hand-written list. A resumed
+        screen that looks different from the one you left reads as a different
+        conversation. So it follows the live order rather than block order: an
+        assistant's text rows first, because the stream closes before any tool
+        starts, then one row per tool call, closed by its result, with
+        `describe` labels. Thinking draws nothing, live or here.
+
+        A failed or cancelled turn ends in a notice. Live, that comes from
+        `agent_end`, which is not stored. Its reason is, on the assistant message
+        (`loop.py:123` copies it from there), so the notice is rebuilt from it in
+        the adapter's wording.
+
+        Tau does the same job in the same place (`tau_coding/tui/state.py:297`,
+        `load_messages`), but walks blocks in order, because its live renderer
+        does too.
+        """
+        calls: dict[str, ToolCall] = {}
+        for message in messages:
+            if isinstance(message, UserMessage):
+                self.add("user", message.content)
+            elif isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextContent) and block.text.strip():
+                        self.add("assistant", block.text)
+                for call in message.tool_calls:
+                    calls[call.id] = call
+                    self.open_tool(call.id, call.name, call.arguments, describe(call))
+                if message.stop_reason == "aborted":
+                    self.add("notice", "cancelled")
+                elif message.stop_reason == "error":
+                    detail = f"error: {message.error_message or ''}".strip()
+                    self.add("notice", detail, is_error=True)
+            elif isinstance(message, ToolResultMessage):
+                opened = calls.get(message.tool_call_id)
+                self.close_tool(
+                    message.tool_call_id,
+                    label=describe(opened, done=True) if opened is not None else message.tool_name,
+                    output=message.text,
+                    is_error=message.is_error,
+                )
 
     # ---------------------------------------------------------------- history
 
