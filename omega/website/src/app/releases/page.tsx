@@ -21,7 +21,7 @@ export const metadata: Metadata = {
  */
 export default function ReleasesPage() {
   return (
-    <section className={`py-16 md:py-20 ${GUTTER}`}>
+    <section className={`py-12 md:py-20 ${GUTTER}`}>
       <PageHeader
         eyebrow="releases"
         title="Every tag, and what it weighed."
@@ -41,7 +41,7 @@ export default function ReleasesPage() {
 
       {/* Said once, at the top, instead of letting the page imply otherwise. */}
       <Reveal>
-        <div className="mt-14 border-t-2 border-rule-strong pt-7">
+        <div className="mt-10 border-t-2 border-rule-strong pt-7 md:mt-14">
           <p className="m-0 max-w-[62ch] text-ink-muted">
             <span className="text-ink">omega is not on PyPI yet.</span> There is no{" "}
             <code className="font-mono text-sm">pip install</code> and nothing on any index. The{" "}
@@ -70,7 +70,7 @@ export default function ReleasesPage() {
         </div>
       </Reveal>
 
-      <ol className="m-0 mt-14 grid list-none gap-0 p-0">
+      <ol className="m-0 mt-10 grid list-none gap-0 p-0 md:mt-14">
         {releases.map((release, i) => (
           <Reveal key={release.tag} delay={i * 50}>
             <li className="grid gap-x-12 gap-y-5 border-t border-rule py-9 md:grid-cols-12">
@@ -91,7 +91,7 @@ export default function ReleasesPage() {
                 <h2 className="m-0 text-xl leading-snug">{release.title}</h2>
                 <p className="m-0 mt-2.5 max-w-[62ch] text-ink-muted">{release.body}</p>
 
-                <div className="mt-5 flex flex-wrap items-baseline gap-x-8 gap-y-2">
+                <div className="mt-5 flex flex-wrap items-baseline gap-x-4 gap-y-2 sm:gap-x-8">
                   {[
                     { value: release.lines, label: "source lines" },
                     { value: release.files, label: "files" },
@@ -102,7 +102,7 @@ export default function ReleasesPage() {
                       <span className="label text-xs text-ink-muted">{stat.label}</span>
                     </span>
                   ))}
-                  <span className="flex items-center gap-1.5">
+                  <span className="flex w-full items-center gap-1.5 sm:w-auto">
                     <code className="rounded-[3px] bg-term px-1.5 py-0.5 font-mono text-[12.5px] text-ink">
                       git checkout {release.tag}
                     </code>

@@ -81,39 +81,3 @@ export function CommandLine({
     </div>
   );
 }
-
-/**
- * A small terminal for one step: a number and a title in the bar, the command
- * below.
- *
- * The home page's first-steps grid is six of these rather than one long
- * terminal, because each step is a different moment — before install, inside
- * omega, in a clone — and one window would imply they run in sequence in the
- * same shell. They do not.
- */
-export function ShellCard({
-  step,
-  title,
-  cmd,
-  output,
-  note,
-}: {
-  step: number;
-  title: string;
-  cmd: string;
-  output?: readonly string[];
-  note?: string;
-}) {
-  return (
-    <Terminal
-      className="h-full"
-      bar={
-        <span className="ml-2 truncate text-[12px] text-white/40">
-          <span className="tnum text-white/60">{String(step).padStart(2, "0")}</span> · {title}
-        </span>
-      }
-    >
-      <CommandLine cmd={cmd} output={output} note={note} />
-    </Terminal>
-  );
-}

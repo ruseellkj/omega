@@ -73,52 +73,46 @@ export const installMethods = [
 ] as const;
 
 /**
- * The home page's first steps, one small terminal each.
+ * The home page's "what it does": six things a user gets, each with the one
+ * command or flag that reaches it.
  *
- * Every `output` line was printed by the real program — the installer's closing
- * lines, the terminal UI's empty prompt, the `--fake` banner, the pytest
- * summary — not written for the page. A step whose real output depends on your
- * key, repository or model shows none, rather than a plausible one.
+ * Every claim was checked against the code, not against this file:
+ * `DEFAULT_THRESHOLD = 0.8` in compact.py, `FILE_MODE = S_IRUSR | S_IWUSR` in
+ * auth.py, `before_record` in redact.py, and the flags and commands against
+ * `omega --help` and the `COMMANDS` registry in commands.py.
  */
-export const firstSteps: readonly {
-  title: string;
-  cmd: string;
-  output?: readonly string[];
-  note?: string;
-}[] = [
+export const features = [
   {
-    title: "Install",
-    cmd: install,
-    output: ["omega 0.1.0", "omega is installed.  Run:  omega"],
+    title: "Asks before it acts",
+    body: "Writes, shell commands and anything outside the working directory wait for your yes, and it remembers the answer. A short list it refuses outright, even with --yes.",
+    cmd: "--confine",
   },
   {
-    title: "Open it, then sign in",
-    cmd: "omega",
-    output: ["❯ Ask anything, or / for commands"],
-    note: "Type /login — a Claude or ChatGPT subscription in the browser, or an API key.",
-  },
-  {
-    title: "Try it with no key",
-    cmd: "omega --fake",
-    output: ["omega (fake provider - scripted responses, nothing is sent anywhere)"],
-  },
-  {
-    title: "One shot, pipeable",
-    cmd: 'omega -p "fix the failing test"',
-    note: "The answer goes to stdout, then it exits.",
-  },
-  {
-    title: "Pick up where you left off",
+    title: "Remembers every session",
+    body: "Each turn is saved as it happens. Continue the last session, switch to another, or rewind to before a question, and the old branch is kept.",
     cmd: "omega -c",
-    note: "Continues the most recent session for this project. omega --sessions lists them all.",
   },
   {
-    title: "Run the tests yourself",
-    cmd: "cd omega/omega && uv run pytest -q",
-    output: ["713 passed in 35.81s"],
-    note: "From a clone. No key, no network.",
+    title: "Survives a long task",
+    body: "At 80% of the context window it compacts the older turns into a summary, and prompt caching keeps the repeated prefix cheap.",
+    cmd: "/compact",
   },
-];
+  {
+    title: "Sign in your way",
+    body: "A Claude or ChatGPT subscription in the browser, or an API key. Stored in ~/.omega/auth.json, readable by you alone.",
+    cmd: "/login",
+  },
+  {
+    title: "Any model, one interface",
+    body: "Anthropic, OpenAI, or anything OpenAI-compatible through --base-url — Ollama, vLLM, Groq. Switch mid-conversation; each window comes from models.dev.",
+    cmd: "/model",
+  },
+  {
+    title: "Scriptable, and discreet",
+    body: "One shot to stdout for a pipe or a script. Anything shaped like a key is masked before a message is stored.",
+    cmd: 'omega -p "…"',
+  },
+] as const;
 
 /**
  * README.md, "Run it". Chosen before the conversation starts.
@@ -176,55 +170,12 @@ export const sessionCommands = [
   { cmd: "!<command>", note: "run a shell command — no model, no tokens" },
 ] as const;
 
-/** 03-production.md §1, 04-boundaries-and-layout.md §2. */
-export const layers = [
-  {
-    n: 4,
-    name: "Terminal UI",
-    detail: "A Textual UI, now the default. It reads the same 10 agent events the REPL does — none were added for it.",
-    state: "built",
-  },
-  {
-    n: 3,
-    name: "Coding app",
-    detail: "Tools, approvals, path resolution, secret redaction, sessions.",
-    state: "built",
-  },
-  {
-    n: 2,
-    name: "Agent core",
-    detail: "The loop, the harness, the hook bundle, the between-turns queues.",
-    state: "built",
-  },
-  {
-    n: 1,
-    name: "Provider",
-    detail: "One interface, 12 stream events, retry swallowed below the boundary.",
-    state: "built",
-  },
-] as const;
-
 /** TIER-2.md, the comparison table at lines 14-19. */
 export const measured = [
   { label: "Source lines", tier1: "1,577", tier2: "4,654", today: "14,226" },
   { label: "Test lines", tier1: "499", tier2: "4,257", today: "13,308" },
   { label: "Tests", tier1: "45", tier2: "289", today: "713" },
   { label: "loop.py", tier1: "151", tier2: "190", today: "190" },
-] as const;
-
-export const providers = [
-  {
-    name: "Anthropic Messages",
-    file: "omega_ai/anthropic.py",
-    detail:
-      "Content blocks, thinking blocks with signatures that must return verbatim, and tool-use ids that must be answered exactly once.",
-  },
-  {
-    name: "OpenAI Chat Completions",
-    file: "omega_ai/openai.py + openai_codex.py",
-    detail:
-      "Not a feature — the exam. A genuinely different wire format, and the same adapter reaches Groq, Together, Ollama and vLLM. A ChatGPT subscription speaks a third format, the Responses API, and gets its own adapter. The format is the unit, not the vendor.",
-  },
 ] as const;
 
 /** TIER-1.md and TIER-2.md — "The one-line summary" of each. */
@@ -315,21 +266,5 @@ export const releases = [
     lines: "1,577",
     files: "12",
     tests: "45",
-  },
-] as const;
-
-/** What the layering bought, stated as claims rather than adjectives. */
-export const claims = [
-  {
-    title: "Adding OpenAI changed nothing above Layer 1",
-    body: "Not a feature — the exam. Chat Completions is a genuinely different wire format, and the provider interface did not move. If it had, Tier 1 was wrong.",
-  },
-  {
-    title: "The loop holds at 190 lines",
-    body: "It hit 249 while the between-turns queues went in. Rather than let it grow, tool dispatch was extracted to its own file. Source has since grown to 14,226 lines and the loop has not moved.",
-  },
-  {
-    title: "713 tests, none touching the network",
-    body: "Every provider call is faked at the interface boundary, which is why omega_ai/fake.py was written before the real adapter. The whole suite runs with no key and no network.",
   },
 ] as const;

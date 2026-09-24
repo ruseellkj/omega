@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { EXTERNAL, NAV } from "@/lib/nav";
+import { EXTERNAL } from "@/lib/nav";
 import { MobileNav } from "@/components/site/mobile-nav";
+import { NavLinks } from "@/components/site/nav-links";
 import { GUTTER } from "@/components/site/primitives";
 
 /**
@@ -31,15 +32,7 @@ export function SiteHeader() {
         aria-label="Primary"
         className="hidden items-center gap-x-5 md:flex md:gap-x-6"
       >
-        {NAV.map((item) => (
-          <Link
-            key={item.label}
-            href={item.href}
-            className="label cursor-pointer text-ink-muted transition-colors duration-200 hover:text-oxblood"
-          >
-            {item.label}
-          </Link>
-        ))}
+        <NavLinks />
 
         {/* A hairline sets the outbound links off from the pages. */}
         <span aria-hidden="true" className="h-3 w-px bg-rule-strong" />

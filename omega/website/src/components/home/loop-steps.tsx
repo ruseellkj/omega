@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 /**
- * The loop's four steps, lit one after another while they are on screen.
+ * The loop's four steps, stacked, lit one after another while on screen.
  *
  * The section's claim is "four steps, on repeat". A static row of four boxes
  * states the steps and loses the repeat; a highlight walking 1 → 2 → 3 → 4 → 1
@@ -44,33 +44,26 @@ export function LoopSteps({
   }, [steps.length]);
 
   return (
-    <ol
-      ref={ref}
-      className="m-0 grid list-none border border-rule bg-paper-raised p-0 md:grid-cols-4"
-    >
+    <ol ref={ref} className="m-0 list-none border-l border-rule p-0">
       {steps.map((s, i) => {
         const lit = i === active;
         return (
-          <li
-            key={s.label}
-            className={`relative border-b border-rule px-6 py-7 transition-colors duration-500 last:border-b-0 md:border-b-0 md:border-r md:last:border-r-0 ${
-              lit ? "bg-paper" : ""
-            }`}
-          >
-            {/* The walking rule: an oxblood bar along the lit step's top edge. */}
+          <li key={s.label} className="relative py-4 pl-6 first:pt-0 last:pb-0">
+            {/* The walking rule: an oxblood bar down the lit step's left edge,
+                laid over the list's hairline. */}
             <span
               aria-hidden="true"
-              className={`absolute inset-x-0 top-0 h-0.5 origin-left bg-oxblood transition-transform duration-500 ${
-                lit ? "scale-x-100" : "scale-x-0"
+              className={`absolute -left-px top-0 bottom-0 w-0.5 origin-top bg-oxblood transition-transform duration-500 ${
+                lit ? "scale-y-100" : "scale-y-0"
               }`}
             />
-            <span className="tnum label text-oxblood">{String(i + 1).padStart(2, "0")}</span>
-            <h3
-              className={`m-0 mt-3 text-xl transition-colors duration-500 ${lit ? "text-oxblood" : ""}`}
-            >
-              {s.label}
-            </h3>
-            <p className="m-0 mt-1.5 text-sm text-ink-muted">{s.detail}</p>
+            <div className="flex items-baseline gap-3">
+              <span className="tnum label text-oxblood">{String(i + 1).padStart(2, "0")}</span>
+              <h3 className={`m-0 text-xl transition-colors duration-500 ${lit ? "text-oxblood" : ""}`}>
+                {s.label}
+              </h3>
+            </div>
+            <p className="m-0 mt-1 text-ink-muted">{s.detail}</p>
           </li>
         );
       })}

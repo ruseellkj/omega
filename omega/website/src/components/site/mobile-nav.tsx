@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useId, useState } from "react";
 import { ExternalArrow } from "@/components/site/primitives";
-import { EXTERNAL, NAV } from "@/lib/nav";
+import { EXTERNAL, NAV, isCurrent } from "@/lib/nav";
 
 /**
  * The phone navigation: a hamburger that discloses the pages beneath it.
@@ -19,6 +20,7 @@ import { EXTERNAL, NAV } from "@/lib/nav";
  */
 export function MobileNav() {
   const [open, setOpen] = useState(false);
+  const pathname = usePathname();
   const panelId = useId();
 
   // Escape is the expected way out of any disclosure.
@@ -59,7 +61,10 @@ export function MobileNav() {
                 <Link
                   href={item.href}
                   onClick={() => setOpen(false)}
-                  className="label block cursor-pointer py-3.5 text-ink-muted transition-colors duration-200 hover:text-oxblood"
+                  aria-current={isCurrent(pathname, item.href) ? "page" : undefined}
+                  className={`label block cursor-pointer py-3.5 transition-colors duration-200 hover:text-oxblood ${
+                    isCurrent(pathname, item.href) ? "text-ink" : "text-ink-muted"
+                  }`}
                 >
                   {item.label}
                 </Link>

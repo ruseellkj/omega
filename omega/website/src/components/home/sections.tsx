@@ -1,97 +1,68 @@
 import Link from "next/link";
 import { LoopSteps } from "@/components/home/loop-steps";
+import { SessionSnapshot } from "@/components/home/session-snapshot";
 import { InstallBox } from "@/components/site/install-box";
-import { Reveal } from "@/components/site/interactive";
-import { Eyebrow, GUTTER, RuleCard, Section, StatusLabel } from "@/components/site/primitives";
-import { ShellCard, Terminal } from "@/components/site/terminal";
-import { claims, firstSteps, layers, measured, providers, timeline } from "@/lib/content";
+import { ExternalArrow, Eyebrow, Section, StatusLabel } from "@/components/site/primitives";
+import { Terminal } from "@/components/site/terminal";
+import { features, measured, site, timeline } from "@/lib/content";
 
-/* ── the numbers ──────────────────────────────────────────────── */
-
-const today = (label: string) => measured.find((m) => m.label === label)?.today ?? "—";
-
-/**
- * Four measured figures, set large, directly under the hero.
- *
- * Tau runs a strip like this under its hero (`.strip` in
- * research/tau/website/layouts/index.html:40). Here every figure is a
- * measurement rather than a verb — read from the same `measured` rows the
- * lessons table uses, so the two pages cannot disagree.
- *
- * The hairlines are the grid's 1px gap showing the rule colour through, so
- * they land between cells at every column count without per-cell border logic.
- */
-const NUMBERS = [
-  { value: today("loop.py"), label: "lines in the loop", note: "loop.py, capped at 250" },
-  { value: today("Tests"), label: "tests, all offline", note: "no key, no network" },
-  { value: today("Source lines"), label: "lines of source", note: "small enough to read" },
-  { value: "3", label: "packages, one rule", note: "enforced by a test" },
-] as const;
-
-export function Numbers() {
-  return (
-    <section className={`border-b border-rule ${GUTTER}`}>
-      <Reveal>
-        <dl className="m-0 grid grid-cols-2 gap-px bg-rule md:grid-cols-4">
-          {NUMBERS.map((n) => (
-            <div key={n.label} className="flex flex-col bg-paper px-1 py-8 sm:px-5 md:py-10">
-              {/* dt first for the markup, the figure first on screen. */}
-              <dt className="label order-2 mt-3 text-oxblood">{n.label}</dt>
-              <dd className="tnum order-1 m-0 font-serif text-4xl leading-none text-ink md:text-5xl">
-                {n.value}
-              </dd>
-              <dd className="order-3 m-0 mt-1 text-sm text-ink-muted">{n.note}</dd>
-            </div>
-          ))}
-        </dl>
-      </Reveal>
-    </section>
+/** The one link style every section closes with, so "read more" always looks the same. */
+function MoreLink({ href, children }: { href: string; children: React.ReactNode }) {
+  const external = href.startsWith("http");
+  const className =
+    "label inline-block cursor-pointer border-b border-rule-strong pb-0.5 text-ink transition-colors duration-200 hover:border-oxblood hover:text-oxblood";
+  return external ? (
+    <a href={href} className={className}>
+      {children}
+      <ExternalArrow className="ml-1.5" />
+    </a>
+  ) : (
+    <Link href={href} className={className}>
+      {children}
+    </Link>
   );
 }
 
-/* ── get started ──────────────────────────────────────────────── */
+/* ── what it does ─────────────────────────────────────────────── */
 
 /**
- * The commands, as small terminals you can copy from.
+ * The question a visitor asks once they have seen a turn: *what else does it do
+ * for me?* Until this section existed the page answered how omega is built
+ * before it said what it is for.
  *
- * Until this section the only commands on the home page were a list of flags
- * in the hero — readable, not copyable, and in no order. These are in the order
- * you would need them, and each output line is one the real program printed.
+ * Text, not terminals. Each item names the one command or flag that reaches the
+ * feature, set as inline code, so the commands are discoverable without six
+ * more dark boxes competing with the one real terminal above. The full list
+ * lives in the docs, which is where the link goes.
  */
-export function GetStarted() {
+export function Features() {
   return (
     <Section>
-      <Eyebrow>get started</Eyebrow>
-      <div className="grid gap-x-12 gap-y-4 md:grid-cols-12 md:items-end">
-        <h2 className="m-0 max-w-[22ch] text-3xl md:col-span-7 md:text-[2.5rem] md:leading-[1.15]">
-          Six commands. Copy the one you need.
-        </h2>
-        <p className="m-0 max-w-[44ch] text-ink-muted md:col-span-5">
-          Install once, then <code className="font-mono text-[0.9em] text-oxblood">omega</code> is
-          the whole command. The rest are for scripts, for trying it without a key, and for reading
-          the code.
-        </p>
-      </div>
+      <Eyebrow>what it does</Eyebrow>
+      <h2 className="m-0 text-3xl md:max-w-[24ch] md:text-[2.5rem] md:leading-[1.15]">
+        What you get when you run it.
+      </h2>
 
-      <ol className="m-0 mt-10 grid list-none gap-4 p-0 sm:grid-cols-2 lg:grid-cols-3">
-        {firstSteps.map((s, i) => (
-          <li key={s.title} className="min-w-0">
-            <ShellCard step={i + 1} title={s.title} cmd={s.cmd} output={s.output} note={s.note} />
+      <ul className="m-0 mt-10 grid list-none gap-x-10 gap-y-9 p-0 sm:grid-cols-2 lg:grid-cols-3">
+        {features.map((f) => (
+          <li key={f.title} className="border-t border-rule-strong pt-5">
+            <h3 className="m-0 text-xl leading-snug">{f.title}</h3>
+            <p className="m-0 mt-2 text-ink-muted">{f.body}</p>
+            <code className="mt-3 inline-block rounded-[4px] bg-term px-1.5 py-0.5 font-mono text-[13px] text-oxblood">
+              {f.cmd}
+            </code>
           </li>
         ))}
-      </ol>
+      </ul>
 
-      <Link
-        href="/docs"
-        className="label mt-8 inline-block cursor-pointer border-b border-rule-strong pb-0.5 text-ink transition-colors duration-200 hover:border-oxblood hover:text-oxblood"
-      >
-        Every flag, key and command
-      </Link>
+      <div className="mt-10">
+        <MoreLink href="/docs#run">Every command, flag and key</MoreLink>
+      </div>
     </Section>
   );
 }
 
-/* ── the loop ─────────────────────────────────────────────────── */
+/* ── how it works ─────────────────────────────────────────────── */
 
 const STEPS = [
   { label: "Ask", detail: "the transcript, the tools, the standing instructions" },
@@ -101,225 +72,185 @@ const STEPS = [
 ] as const;
 
 /**
- * A full-width band, deliberately not another split. Three earlier attempts —
- * a circle, a railed card, the source itself — were all the hero's shape with
- * something else on the right, and a repeated layout is invisible whatever sits
- * inside it.
+ * Two sides that say the same thing twice, on purpose: the steps in words on
+ * the left, one real turn on the right. The turn is the steps, performed — the
+ * question is step one, the two tool rows are steps two and three, the answer
+ * is step four — so the terminal is evidence for the list beside it rather
+ * than a picture floating on its own.
+ *
+ * It follows the hero directly because "what does using it look like" is the
+ * next thing a visitor wants once they know what it is.
  */
 export function Loop() {
   return (
-    <Section>
-      <Eyebrow>the loop</Eyebrow>
-      <h2 className="m-0 max-w-[24ch] text-3xl md:text-[2.5rem] md:leading-[1.15]">
-        Four steps, on repeat. That is the entire agent.
-      </h2>
-
-      <div className="mt-10">
-        <LoopSteps steps={STEPS} />
-
-        <div className="flex flex-col gap-2 border-x border-b border-rule px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <span className="flex items-baseline gap-2.5 text-sm text-ink-muted">
+    <Section id="how-it-works">
+      <div className="grid gap-x-12 gap-y-12 lg:grid-cols-12 lg:items-center">
+        <div className="lg:col-span-5">
+          <Eyebrow>how it works</Eyebrow>
+          <h2 className="m-0 text-3xl md:text-[2.5rem] md:leading-[1.15]">
+            Four steps, on repeat. That is the entire agent.
+          </h2>
+          <div className="mt-9">
+            <LoopSteps steps={STEPS} />
+          </div>
+          <p className="m-0 mt-8 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 text-sm text-ink-muted">
             <span aria-hidden="true" className="text-oxblood">
               &#8635;
             </span>
-            Repeat for as long as it keeps asking.
-          </span>
-          <span className="flex items-baseline gap-2.5 text-sm">
+            Repeat for as long as it keeps asking;
             <span className="label text-forest">stop</span>
-            <span className="text-ink-muted">it stops asking</span>
-          </span>
-        </div>
-      </div>
-    </Section>
-  );
-}
-
-/* ── the boundary ─────────────────────────────────────────────── */
-
-const PARTS = [
-  {
-    role: "the brain",
-    symbol: "Harness",
-    line: "Owns the transcript, the queues and cancellation. Has never heard of a file or a terminal.",
-  },
-  {
-    role: "the environment",
-    symbol: "build_tools()",
-    line: "Tools, approvals, path checks, secret redaction. Everything that touches your machine.",
-  },
-  {
-    role: "the face",
-    symbol: "cli · headless",
-    line: "Two entry points: cli hands one harness to the terminal UI, the REPL or -p, and headless drives it from code. None can call the loop — all only subscribe to events.",
-  },
-] as const;
-
-export function BoundarySection() {
-  return (
-    <Section>
-      <Eyebrow>the boundary</Eyebrow>
-      <h2 className="m-0 max-w-[26ch] text-3xl md:text-[2.5rem] md:leading-[1.15]">
-        Separate the brain, the environment, and the face.
-      </h2>
-      <p className="mt-5 max-w-[56ch] text-lg text-ink-muted">
-        The brain is a package of its own; the environment and the face sit above it. Each is
-        defined as much by what it is forbidden to know.
-      </p>
-
-      <div className="mt-10 grid gap-x-10 gap-y-8 md:grid-cols-3">
-        {PARTS.map((p) => (
-          <div key={p.symbol} className="border-t-2 border-oxblood pt-5">
-            <h3 className="m-0 font-serif text-2xl">{p.role}</h3>
-            <p className="m-0 mt-1 font-mono text-xs text-ink-muted">{p.symbol}</p>
-            <p className="m-0 mt-4 text-ink-muted">{p.line}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Tau draws its own split in the same box ("tau — design split"); the
-          arrows here are measured from the imports, not copied from Tau's,
-          because omega_ai imports omega_agent and not the other way round. */}
-      <Terminal title="omega — design split" className="mt-10" bodyClassName="px-6 py-5">
-        <pre className="m-0 overflow-x-auto font-mono text-[13px] leading-[1.9]">
-          <code>
-            <span className="text-shell-key">Harness</span>
-            {`        = reusable agent brain
-`}
-            <span className="text-shell-key">build_tools()</span>
-            {`  = coding-agent environment
-`}
-            <span className="text-shell-key">cli · headless</span>
-            {` = two entry points
-
-`}
-            <span className="text-shell-dim">dependency direction — who imports whom</span>
-            {`
-omega_coding → omega_ai → omega_agent
-omega_coding → omega_agent
-`}
-            <span className="text-shell-dim">omega_agent imports neither — tests/test_layers.py fails if it does</span>
-          </code>
-        </pre>
-      </Terminal>
-    </Section>
-  );
-}
-
-/* ── what the layering bought ─────────────────────────────────── */
-
-export function Claims() {
-  return (
-    <Section>
-      <Eyebrow>what the layering bought</Eyebrow>
-      <ul className="m-0 grid list-none gap-x-10 gap-y-9 p-0 md:grid-cols-3">
-        {claims.map((c, i) => (
-          <li key={c.title} className="border-t border-rule-strong pt-5">
-            <span className="tnum label text-ink-muted">{String(i + 1).padStart(2, "0")}</span>
-            <h3 className="m-0 mt-3 text-xl leading-snug">{c.title}</h3>
-            <p className="m-0 mt-3 text-sm text-ink-muted">{c.body}</p>
-          </li>
-        ))}
-      </ul>
-    </Section>
-  );
-}
-
-/* ── the stack ────────────────────────────────────────────────── */
-
-function DownArrow() {
-  return (
-    <div aria-hidden="true" className="flex justify-center py-1.5">
-      <svg width="11" height="20" viewBox="0 0 11 20" className="text-rule-strong">
-        <line x1="5.5" y1="0" x2="5.5" y2="14" stroke="currentColor" strokeWidth="1" />
-        <path d="M1.5 12 L5.5 18 L9.5 12" fill="none" stroke="currentColor" strokeWidth="1" />
-      </svg>
-    </div>
-  );
-}
-
-export function Stack() {
-  return (
-    <Section>
-      <Eyebrow>the stack</Eyebrow>
-      <div className="grid gap-x-12 gap-y-8 md:grid-cols-12">
-        <div className="md:col-span-5">
-          <h2 className="mt-0 text-3xl">Dependencies point one way.</h2>
-          <p className="mt-5 max-w-[42ch] text-ink-muted">
-            An arrow means <em>this layer knows the other exists</em> — knowledge, not data. Nothing
-            above Layer&nbsp;2 can reach in and change the loop.
+            when it stops.
           </p>
         </div>
 
-        <ol className="m-0 list-none p-0 md:col-span-7">
-          {layers.map((layer, i) => (
-            <li key={layer.n}>
-              <div className="grid grid-cols-[auto_1fr_auto] items-baseline gap-4 border border-rule bg-paper-raised px-5 py-4">
-                <span className="tnum label text-oxblood">L{layer.n}</span>
-                <div>
-                  <h3 className="m-0 text-xl">{layer.name}</h3>
-                  <p className="m-0 mt-1 text-sm text-ink-muted">{layer.detail}</p>
+        <div className="min-w-0 lg:col-span-7">
+          <SessionSnapshot />
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+/* ── how it's built ───────────────────────────────────────────── */
+
+/**
+ * CLAUDE.md's architecture table, verbatim in meaning: what each package knows
+ * about. One framing only — the page used to describe the same code three ways
+ * (brain / environment / face, then L1–L4, then two providers), and a reader
+ * meeting three decompositions of one system cannot tell they are the same.
+ */
+const PACKAGES = [
+  ["omega_agent", "messages, events, tools, turns, sessions"],
+  ["omega_ai", "one vendor's wire format each"],
+  ["omega_coding", "files, shells, policy, the screen"],
+] as const;
+
+/**
+ * Tau's layout for the same idea (research/tau/website/layouts/index.html, "the
+ * boundary"): the argument beside one terminal. Mirrored from "how it works" —
+ * terminal left, text right on wide screens — so the two terminal sections
+ * alternate sides instead of repeating one shape. On a phone the text comes
+ * first in both, because the argument is what makes the terminal legible.
+ */
+export function Architecture() {
+  return (
+    <Section>
+      <Eyebrow>how it&apos;s built</Eyebrow>
+      <div className="grid items-center gap-x-12 gap-y-10 lg:grid-cols-12">
+        <div className="lg:order-2 lg:col-span-5">
+          <h2 className="m-0 text-3xl md:text-[2.5rem] md:leading-[1.15]">
+            Three packages. Arrows point one way.
+          </h2>
+          <p className="mt-5 text-lg text-ink-muted md:max-w-[46ch]">
+            Each package is defined as much by what it may not know. The loop lives in{" "}
+            <code className="font-mono text-[0.85em] text-ink">omega_agent</code> and has never heard
+            of a file, a vendor or a terminal — which is why a second wire format went in without the
+            provider interface moving.
+          </p>
+          <div className="mt-6">
+            <MoreLink href={`${site.repo}/blob/main/dev-notes/03-architecture/04-boundaries-and-layout.md`}>
+              The boundaries, in depth
+            </MoreLink>
+          </div>
+        </div>
+
+        <div className="min-w-0 lg:order-1 lg:col-span-7">
+          {/* Rows rather than one <pre>: the longest line is too wide for a
+              phone, and a grid keeps the names aligned while each description
+              wraps under itself. */}
+          <Terminal title="omega — design split" bodyClassName="px-5 py-5 text-[12px] sm:text-[13px] md:px-6">
+            <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
+              {PACKAGES.map(([name, knows]) => (
+                <div key={name} className="contents">
+                  <dt className="whitespace-nowrap text-shell-key">{name}</dt>
+                  <dd className="m-0">= {knows}</dd>
                 </div>
-                <StatusLabel state={layer.state} />
-              </div>
-              {i < layers.length - 1 && <DownArrow />}
-            </li>
-          ))}
-        </ol>
+              ))}
+            </dl>
+            <p className="m-0 mt-5 text-shell-dim">dependency direction — who imports whom</p>
+            <p className="m-0 whitespace-nowrap text-white">omega_coding → omega_ai → omega_agent</p>
+            <p className="m-0 whitespace-nowrap text-white">omega_coding → omega_agent</p>
+            <p className="m-0 mt-5 text-shell-dim">
+              tests/test_layers.py parses every import and fails if one points up
+            </p>
+          </Terminal>
+        </div>
       </div>
     </Section>
   );
 }
 
-/* ── two providers ────────────────────────────────────────────── */
+/* ── measured, not claimed ────────────────────────────────────── */
 
-export function Providers() {
+const today = (label: string) => measured.find((m) => m.label === label)?.today ?? "—";
+const tier = (label: string, t: "tier1" | "tier2") => measured.find((m) => m.label === label)?.[t] ?? "—";
+
+/**
+ * Each figure with the one sentence that makes it mean something. These used to
+ * be two sections — a strip of bare numbers under the hero and a "what the
+ * layering bought" list further down — that stated the same three facts twice.
+ *
+ * It sits after the architecture on purpose: "190 lines in the loop" is a
+ * number before you have seen the loop and evidence after. The hero's headline
+ * states the claim; this is where it is backed.
+ *
+ * Figures come from `measured`, the same rows the lessons table reads.
+ */
+const PROOF = [
+  {
+    value: today("loop.py"),
+    label: "lines in the loop",
+    note: "It reached 249 while the between-turns queues went in. Tool dispatch moved to its own file rather than the limit of 250 moving.",
+  },
+  {
+    value: today("Tests"),
+    label: "tests, no network",
+    note: "Every provider call is faked at the interface, which is why the fake adapter was written before the real one.",
+  },
+  {
+    value: today("Source lines"),
+    label: "lines of source",
+    note: `Up from ${tier("Source lines", "tier1")} at Tier 1 and ${tier("Source lines", "tier2")} at Tier 2. The loop has not grown since.`,
+  },
+  {
+    value: "3",
+    label: "wire formats, one interface",
+    note: "Anthropic Messages, OpenAI Chat Completions, and the Responses API behind a ChatGPT subscription.",
+  },
+] as const;
+
+/**
+ * Left padding per cell, because the column a cell starts in changes with the
+ * grid: one column on a phone, two at `sm`, four from `lg`. A cell that opens a
+ * row sits flush with the gutter; one that follows a divider gets clear of it.
+ */
+const INSET = ["sm:pl-0", "sm:pl-6", "sm:pl-0 lg:pl-6", "sm:pl-6"] as const;
+
+export function Proof() {
   return (
     <Section>
-      <Eyebrow>two providers, one interface</Eyebrow>
-      <div className="grid gap-10 md:grid-cols-2">
-        {providers.map((p) => (
-          <RuleCard key={p.name} title={p.name} meta={p.file}>
-            {p.detail}
-          </RuleCard>
-        ))}
-      </div>
-    </Section>
-  );
-}
-
-/* ── where it is ──────────────────────────────────────────────── */
-
-export function Timeline() {
-  return (
-    <Section>
-      <Eyebrow>where it is</Eyebrow>
-      <div>
-        {timeline.map((t, i) => (
-          <div
-            key={t.tier}
-            className={`grid gap-x-8 gap-y-2 py-6 md:grid-cols-12 ${
-              i < timeline.length - 1 ? "border-b border-rule" : ""
-            }`}
-          >
-            <div className="flex items-baseline gap-3 md:col-span-3">
-              <h3 className="m-0 font-serif text-2xl">{t.tier}</h3>
-              <StatusLabel state={t.status} />
-            </div>
-            <p className="m-0 text-xl md:col-span-9">{t.headline}</p>
+      <Eyebrow>measured, not claimed</Eyebrow>
+      <h2 className="m-0 text-3xl md:max-w-[26ch] md:text-[2.5rem] md:leading-[1.15]">
+        Four numbers, and what each one proves.
+      </h2>
+      <dl className="m-0 mt-10 grid gap-px bg-rule sm:grid-cols-2 lg:grid-cols-4">
+        {PROOF.map((p, i) => (
+          <div key={p.label} className={`flex flex-col bg-paper py-6 pr-4 sm:py-2 ${INSET[i]}`}>
+            {/* dt first for the markup, the figure first on screen. */}
+            <dt className="label order-2 mt-3 text-oxblood">{p.label}</dt>
+            <dd className="tnum order-1 m-0 font-serif text-5xl leading-none text-ink">{p.value}</dd>
+            <dd className="order-3 m-0 mt-2 text-pretty text-sm text-ink-muted">{p.note}</dd>
           </div>
         ))}
+      </dl>
+      <div className="mt-10">
+        <MoreLink href="/lessons">What building it taught</MoreLink>
       </div>
-      <a
-        href="/roadmap"
-        className="label mt-8 inline-block cursor-pointer border-b border-rule-strong pb-0.5 text-ink transition-colors duration-200 hover:border-oxblood hover:text-oxblood"
-      >
-        The full roadmap
-      </a>
     </Section>
   );
 }
 
-/* ── the origin ───────────────────────────────────────────────── */
+/* ── how it got here ──────────────────────────────────────────── */
 
 const ORIGINS = [
   {
@@ -332,37 +263,65 @@ const ORIGINS = [
     name: "Tau",
     href: "https://twotimespi.dev",
     host: "twotimespi.dev",
-    line: "Python. A coding agent small enough to read like a textbook, with the reasoning kept in the open.",
+    line: "Python. A coding agent small enough to read like a textbook.",
   },
 ] as const;
 
-export function Origin() {
+/**
+ * Where it is and where it came from, as one section: both are the project's
+ * history, and apart they were two more stops on an already long page. The
+ * timeline takes the wide column because it is the part that changes.
+ */
+export function Story() {
   return (
     <Section>
-      <Eyebrow>the origin</Eyebrow>
-      <h2 className="m-0 max-w-[26ch] text-3xl md:text-[2.5rem] md:leading-[1.15]">
-        Inspired by Pi and Tau, written as a Python learning path.
+      <Eyebrow>how it got here</Eyebrow>
+      <h2 className="m-0 text-3xl md:max-w-[26ch] md:text-[2.5rem] md:leading-[1.15]">
+        Built one tier at a time, from two references.
       </h2>
-      <p className="mt-6 max-w-[58ch] text-lg text-ink-muted">
-        Pi is the exemplar and Tau is the Python mirror. Omega shares no code with either — it was
-        read, then rebuilt from scratch, because the only way to understand a coding agent is to
-        write one.
-      </p>
 
-      <div className="mt-10 grid gap-x-10 gap-y-8 sm:grid-cols-2">
-        {ORIGINS.map((o) => (
-          <a
-            key={o.name}
-            href={o.href}
-            className="group cursor-pointer border-t-2 border-rule-strong pt-5 no-underline transition-colors duration-200 hover:border-oxblood"
-          >
-            <h3 className="m-0 font-serif text-2xl transition-colors duration-200 group-hover:text-oxblood">
-              {o.name}
-            </h3>
-            <p className="m-0 mt-2 text-ink-muted">{o.line}</p>
-            <span className="label mt-3 inline-block text-ink-muted">{o.host}</span>
-          </a>
-        ))}
+      <div className="mt-10 grid gap-x-12 gap-y-12 lg:grid-cols-12">
+        <div className="lg:col-span-7">
+          <ol className="m-0 list-none p-0">
+            {timeline.map((t) => (
+              <li
+                key={t.tier}
+                className="grid gap-x-6 gap-y-1 border-b border-rule py-4 first:pt-0 sm:grid-cols-[14rem_minmax(0,1fr)]"
+              >
+                <span className="flex items-baseline gap-3">
+                  <span className="font-serif text-xl">{t.tier}</span>
+                  <StatusLabel state={t.status} />
+                </span>
+                <span className="text-ink-muted">{t.headline}</span>
+              </li>
+            ))}
+          </ol>
+          <div className="mt-6">
+            <MoreLink href="/roadmap">The full roadmap</MoreLink>
+          </div>
+        </div>
+
+        <div className="lg:col-span-5">
+          <p className="label m-0 text-ink-muted">where it came from</p>
+          <ul className="m-0 mt-4 grid list-none gap-6 p-0">
+            {ORIGINS.map((o) => (
+              <li key={o.name}>
+                <a href={o.href} className="group cursor-pointer no-underline">
+                  <span className="font-serif text-xl transition-colors duration-200 group-hover:text-oxblood">
+                    {o.name}
+                  </span>
+                  <span className="label ml-3 text-ink-muted">{o.host}</span>
+                  <ExternalArrow className="ml-1 text-ink-muted" />
+                </a>
+                <p className="m-0 mt-1 text-ink-muted">{o.line}</p>
+              </li>
+            ))}
+          </ul>
+          <p className="m-0 mt-6 text-sm text-ink-muted">
+            omega shares no code with either. Both were read, then it was written from scratch —
+            the only way to understand a coding agent is to write one.
+          </p>
+        </div>
       </div>
     </Section>
   );
@@ -371,26 +330,30 @@ export function Origin() {
 /* ── the close ────────────────────────────────────────────────── */
 
 /**
- * The install box again, at the bottom, where a reader who scrolled the whole
- * page arrives having decided. Tau closes the same way (the `closing` section
- * of research/tau/website/layouts/index.html). No second big Ω here: the footer
- * directly below already sets one at full size.
+ * The install box again, at the bottom, for the reader who scrolled the whole
+ * page and arrives having decided. Tau closes the same way (the `closing`
+ * section of research/tau/website/layouts/index.html).
+ *
+ * Twice on the page and no more: once where a visitor first decides (the hero),
+ * once where a reader finishes. A third copy mid-page would interrupt the
+ * explanation it sits inside. No second big Ω either — the footer directly
+ * below already sets one.
  */
 export function Closing() {
   return (
-    <Section last className="pt-20">
-      <div className="mx-auto max-w-2xl text-center">
+    <Section last className="md:pt-20">
+      <div className="mx-auto max-w-2xl sm:text-center">
         <Eyebrow>start here</Eyebrow>
         <h2 className="m-0 text-3xl md:text-[2.5rem] md:leading-[1.15]">
           Read it end to end. Then run it.
         </h2>
-        <p className="mx-auto mt-4 max-w-[46ch] text-lg text-ink-muted">
+        <p className="mt-4 text-lg text-ink-muted sm:mx-auto sm:max-w-[46ch]">
           One line installs it, and{" "}
           <code className="font-mono text-[0.9em] text-oxblood">omega --fake</code> needs no key, no
           network and no credits.
         </p>
-        <InstallBox className="mx-auto mt-9 max-w-xl text-left" />
-        <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
+        <InstallBox centered className="mt-9 sm:mx-auto sm:max-w-xl sm:text-left" />
+        <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3 sm:justify-center">
           <Link
             href="/docs"
             className="label cursor-pointer border-b border-oxblood pb-0.5 text-oxblood transition-colors duration-200 hover:border-ink hover:text-ink"

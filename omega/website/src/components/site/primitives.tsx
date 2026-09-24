@@ -47,22 +47,30 @@ export function ExternalArrow({ className = "" }: { className?: string }) {
 /**
  * A page section: standard gutter, standard rhythm, revealed on scroll.
  * `last` drops the bottom rule and adds the closing space.
+ *
+ * `id` is optional — only a section a link actually jumps to needs one (the
+ * hero's scroll cue is the first). `scroll-mt-24` is included with it so the
+ * sticky header never covers the heading the link landed on.
  */
 export function Section({
   children,
   last = false,
   className = "",
+  id,
 }: {
   children: React.ReactNode;
   last?: boolean;
   className?: string;
+  id?: string;
 }) {
   return (
     <section
+      id={id}
       className={[
-        last ? "pb-20" : "border-b border-rule",
+        last ? "pb-16 md:pb-20" : "border-b border-rule",
         GUTTER,
-        "py-16",
+        "py-12 md:py-16",
+        id ? "scroll-mt-24" : "",
         className,
       ].join(" ")}
     >
@@ -103,26 +111,5 @@ export function StatusLabel({ state, className = "" }: { state: string; classNam
   const done = state === "built" || state === "closed" || state === "shipped";
   return (
     <span className={`label ${done ? "text-forest" : "text-oxblood"} ${className}`}>{state}</span>
-  );
-}
-
-/** A card ruled along its top edge — the page's single card treatment. */
-export function RuleCard({
-  title,
-  meta,
-  children,
-  accent = true,
-}: {
-  title: string;
-  meta?: string;
-  children?: React.ReactNode;
-  accent?: boolean;
-}) {
-  return (
-    <article className={`border-t-2 pt-5 ${accent ? "border-oxblood" : "border-rule-strong"}`}>
-      <h3 className="m-0 text-2xl">{title}</h3>
-      {meta && <p className="m-0 mt-1 font-mono text-xs text-ink-muted">{meta}</p>}
-      {children && <div className="mt-4 max-w-[46ch] text-ink-muted">{children}</div>}
-    </article>
   );
 }

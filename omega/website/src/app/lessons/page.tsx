@@ -42,7 +42,7 @@ const LESSONS = [
 
 export default function LessonsPage() {
   return (
-    <section className={`py-16 md:py-20 ${GUTTER}`}>
+    <section className={`py-12 md:py-20 ${GUTTER}`}>
       <PageHeader
         eyebrow="lessons"
         title="What it actually taught."
@@ -51,9 +51,9 @@ export default function LessonsPage() {
 
       {/* The measurements the lessons are drawn from. */}
       <Reveal delay={60}>
-        <div className="mt-14 grid gap-x-12 gap-y-8 border-t-2 border-rule-strong pt-7 md:grid-cols-12">
+        <div className="mt-10 grid gap-x-12 gap-y-8 border-t-2 border-rule-strong pt-7 md:mt-14 md:grid-cols-12">
           <div className="md:col-span-5">
-            <h2 className="m-0 max-w-[18ch] text-2xl leading-snug">Tier 1 to Tier 2, measured.</h2>
+            <h2 className="m-0 text-2xl leading-snug md:max-w-[18ch]">Tier 1 to Tier 2, measured.</h2>
             <p className="mt-4 max-w-[44ch] text-ink-muted">
               Tests grew almost three times faster than source. That ratio is the single most useful
               number here — it is what safety actually costs. The last column is the work since
@@ -94,14 +94,14 @@ export default function LessonsPage() {
         </div>
       </Reveal>
 
-      <ol className="m-0 mt-16 grid list-none gap-0 p-0">
+      <ol className="m-0 mt-12 grid list-none gap-0 p-0 md:mt-16">
         {LESSONS.map((lesson, i) => (
           <Reveal key={lesson.title} delay={i * 50}>
             <li className="grid gap-x-12 gap-y-3 border-t border-rule py-8 md:grid-cols-12">
               <span className="tnum label m-0 text-oxblood md:col-span-2">
                 {String(i + 1).padStart(2, "0")}
               </span>
-              <h2 className="m-0 max-w-[22ch] text-2xl leading-snug md:col-span-4">
+              <h2 className="m-0 text-2xl leading-snug md:col-span-4 md:max-w-[22ch]">
                 {lesson.title}
               </h2>
               <p className="m-0 max-w-[58ch] text-ink-muted md:col-span-6">{lesson.body}</p>

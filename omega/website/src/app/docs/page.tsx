@@ -265,7 +265,7 @@ export default function DocsPage() {
   const total = SECTIONS.reduce((n, s) => n + s.items.length, 0);
 
   return (
-    <section className={`py-16 md:py-20 ${GUTTER}`}>
+    <section className={`py-12 md:py-20 ${GUTTER}`}>
       <PageHeader
         eyebrow="docs"
         title="Everything omega has."
@@ -283,14 +283,14 @@ export default function DocsPage() {
         </div>
       </PageHeader>
 
-      <div className="mt-16 grid gap-x-12 gap-y-14">
+      <div className="mt-12 grid gap-x-12 gap-y-12 md:mt-16 md:gap-y-14">
         {/* One line, first. Everything below it assumes omega is already
             installed, and until this section existed the page assumed a clone. */}
         <Reveal>
-          <div className="grid gap-x-12 gap-y-6 border-t-2 border-rule-strong pt-7 md:grid-cols-12">
+          <div id="install" className="grid scroll-mt-24 gap-x-12 gap-y-6 border-t-2 border-rule-strong pt-7 md:grid-cols-12">
             <div className="md:col-span-3">
               <h2 className="label m-0 text-oxblood">Install</h2>
-              <p className="m-0 mt-2.5 max-w-[28ch] text-sm text-ink-muted">
+              <p className="m-0 mt-2.5 text-sm text-ink-muted md:max-w-[28ch]">
                 Three routes, each run end to end before it went on this page. Nothing is on PyPI
                 yet, so there is no <code className="font-mono">pip install</code>.
               </p>
@@ -313,10 +313,10 @@ export default function DocsPage() {
         {/* The flags, as a terminal you can copy from. They were only on the
             home page before, as a list you could read and not copy. */}
         <Reveal>
-          <div className="grid gap-x-12 gap-y-6 border-t-2 border-rule-strong pt-7 md:grid-cols-12">
+          <div id="run" className="grid scroll-mt-24 gap-x-12 gap-y-6 border-t-2 border-rule-strong pt-7 md:grid-cols-12">
             <div className="md:col-span-3">
               <h2 className="label m-0 text-oxblood">Run it</h2>
-              <p className="m-0 mt-2.5 max-w-[28ch] text-sm text-ink-muted">
+              <p className="m-0 mt-2.5 text-sm text-ink-muted md:max-w-[28ch]">
                 Chosen before the conversation starts. The first is the whole command; the rest are
                 for scripts, for trying it without a key, and for coming back.
               </p>
@@ -331,38 +331,14 @@ export default function DocsPage() {
           </div>
         </Reveal>
 
-        {/* The keys. A third kind of thing from the two command lists: not
-            chosen before the conversation, not typed into it. */}
-        <Reveal delay={50}>
-          <div className="grid gap-x-12 gap-y-6 border-t-2 border-rule-strong pt-7 md:grid-cols-12">
-            <div className="md:col-span-3">
-              <h2 className="label m-0 text-oxblood">In the terminal UI</h2>
-              <p className="m-0 mt-2.5 max-w-[28ch] text-sm text-ink-muted">
-                <code className="font-mono">ctrl+c</code> stops the turn rather than the program —
-                with nothing running, it takes a second press to quit.
-              </p>
-            </div>
-            <ul className="m-0 grid list-none gap-x-10 gap-y-2.5 p-0 sm:grid-cols-2 md:col-span-9">
-              {keys.map((k) => (
-                <li key={k.key} className="grid grid-cols-[4.25rem_minmax(0,1fr)] items-baseline gap-x-3">
-                  <kbd className="justify-self-start rounded-[3px] border border-b-2 border-rule-strong bg-paper-raised px-1.5 py-0.5 font-mono text-[12.5px] text-oxblood">
-                    {k.key}
-                  </kbd>
-                  <span className="text-sm text-ink-muted">{k.note}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </Reveal>
-
         {/* The in-session commands, spelled out rather than linked. Typing /
             in the terminal UI lists them too, but only once you are inside —
             this is the list for deciding whether to install. */}
         <Reveal>
-          <div className="grid gap-x-12 gap-y-6 border-t-2 border-rule-strong pt-7 md:grid-cols-12">
+          <div id="commands" className="grid scroll-mt-24 gap-x-12 gap-y-6 border-t-2 border-rule-strong pt-7 md:grid-cols-12">
             <div className="md:col-span-3">
               <h2 className="label m-0 text-oxblood">In the conversation</h2>
-              <p className="m-0 mt-2.5 max-w-[28ch] text-sm text-ink-muted">
+              <p className="m-0 mt-2.5 text-sm text-ink-muted md:max-w-[28ch]">
                 A leading <code className="font-mono">/</code> addresses the program, a leading{" "}
                 <code className="font-mono">!</code> addresses the shell. Everything else goes to
                 the model.
@@ -381,12 +357,39 @@ export default function DocsPage() {
           </div>
         </Reveal>
 
+        {/* The keys. A third kind of thing from the two command lists: not
+            chosen before the conversation, not typed into it. */}
+        <Reveal delay={50}>
+          <div id="keys" className="grid scroll-mt-24 gap-x-12 gap-y-6 border-t-2 border-rule-strong pt-7 md:grid-cols-12">
+            <div className="md:col-span-3">
+              <h2 className="label m-0 text-oxblood">In the terminal UI</h2>
+              <p className="m-0 mt-2.5 text-sm text-ink-muted md:max-w-[28ch]">
+                <code className="font-mono">ctrl+c</code> stops the turn rather than the program —
+                with nothing running, it takes a second press to quit.
+              </p>
+            </div>
+            <ul className="m-0 grid list-none gap-x-10 gap-y-2.5 p-0 sm:grid-cols-2 md:col-span-9">
+              {keys.map((k) => (
+                <li key={k.key} className="grid grid-cols-[4.25rem_minmax(0,1fr)] items-baseline gap-x-3">
+                  <kbd className="justify-self-start rounded-[3px] border border-b-2 border-rule-strong bg-paper-raised px-1.5 py-0.5 font-mono text-[12.5px] text-oxblood">
+                    {k.key}
+                  </kbd>
+                  <span className="text-sm text-ink-muted">{k.note}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Reveal>
+
         {SECTIONS.map((section, si) => (
           <Reveal key={section.title} delay={si * 50}>
-            <div className="grid gap-x-12 gap-y-6 border-t-2 border-rule-strong pt-7 md:grid-cols-12">
+            <div
+              id={section.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}
+              className="grid scroll-mt-24 gap-x-12 gap-y-6 border-t-2 border-rule-strong pt-7 md:grid-cols-12"
+            >
               <div className="md:col-span-3">
                 <h2 className="label m-0 text-oxblood">{section.title}</h2>
-                <p className="m-0 mt-2.5 max-w-[28ch] text-sm text-ink-muted">{section.lede}</p>
+                <p className="m-0 mt-2.5 text-sm text-ink-muted md:max-w-[28ch]">{section.lede}</p>
               </div>
               <ul className="m-0 grid list-none gap-6 p-0 md:col-span-9">
                 {section.items.map((item) => (
@@ -400,10 +403,10 @@ export default function DocsPage() {
         {/* The gap, named. A docs page that lists only what exists reads as
             complete; this is the half that keeps it honest. */}
         <Reveal>
-          <div className="grid gap-x-12 gap-y-6 border-t-2 border-rule-strong pt-7 md:grid-cols-12">
+          <div id="not-yet" className="grid scroll-mt-24 gap-x-12 gap-y-6 border-t-2 border-rule-strong pt-7 md:grid-cols-12">
             <div className="md:col-span-3">
               <h2 className="label m-0 text-ink-muted">Not here yet</h2>
-              <p className="m-0 mt-2.5 max-w-[28ch] text-sm text-ink-muted">
+              <p className="m-0 mt-2.5 text-sm text-ink-muted md:max-w-[28ch]">
                 Named so the gap is countable. Everything Tier 3 promised shipped; what is left is
                 product work, tracked in the backlog or not planned.
               </p>

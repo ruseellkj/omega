@@ -5,7 +5,7 @@ import { GUTTER } from "@/components/site/primitives";
 /** The wordmark at full voice, the way Tau closes its page. */
 export function SiteFooter() {
   return (
-    <footer className={`border-t border-rule pb-10 pt-16 ${GUTTER}`}>
+    <footer className={`border-t border-rule pb-10 pt-12 md:pt-16 ${GUTTER}`}>
       <div className="grid gap-10 md:grid-cols-12">
         <div className="md:col-span-7">
           <p
@@ -19,7 +19,7 @@ export function SiteFooter() {
           </p>
         </div>
 
-        <div className="flex flex-col gap-3 md:col-span-5 md:items-end md:justify-end">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-3 md:col-span-5 md:flex md:flex-col md:items-end md:justify-end">
           {NAV.map((item) => (
             <Link
               key={item.label}
@@ -38,7 +38,7 @@ export function SiteFooter() {
               {item.label}
             </a>
           ))}
-          <p className="m-0 mt-4 text-sm text-ink-muted/80">MIT &middot; pull requests welcome</p>
+          <p className="col-span-2 m-0 mt-4 text-sm text-ink-muted/80">MIT &middot; pull requests welcome</p>
         </div>
       </div>
     </footer>

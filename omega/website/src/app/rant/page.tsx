@@ -61,7 +61,7 @@ const SECTIONS = [
 
 export default function RantPage() {
   return (
-    <section className={`py-16 md:py-20 ${GUTTER}`}>
+    <section className={`py-12 md:py-20 ${GUTTER}`}>
       <PageHeader
         eyebrow="rant"
         title="Why build one at all?"
@@ -70,9 +70,9 @@ export default function RantPage() {
 
       {/* ── the spike, and what it costs ─────────────────────── */}
       <Reveal delay={60}>
-        <div className="mt-16 grid gap-x-12 gap-y-8 border-t-2 border-rule-strong pt-7 md:grid-cols-12">
+        <div className="mt-12 grid gap-x-12 gap-y-8 border-t-2 border-rule-strong pt-7 md:mt-16 md:grid-cols-12">
           <div className="md:col-span-5">
-            <h2 className="m-0 max-w-[20ch] text-2xl leading-snug">
+            <h2 className="m-0 text-2xl leading-snug md:max-w-[20ch]">
               The loop is easy. Everything else is the work.
             </h2>
             <p className="mt-4 max-w-[46ch] text-ink-muted">
@@ -106,7 +106,7 @@ export default function RantPage() {
 
       {/* ── the nine ─────────────────────────────────────────── */}
       <Reveal delay={90}>
-        <div className="mt-16 border-t-2 border-rule-strong pt-7">
+        <div className="mt-12 border-t-2 border-rule-strong pt-7 md:mt-16">
           <h2 className="m-0 max-w-[24ch] text-2xl leading-snug">
             Point it at something real and it fails in nine specific ways.
           </h2>
@@ -135,11 +135,11 @@ export default function RantPage() {
       </Reveal>
 
       {/* ── prose ────────────────────────────────────────────── */}
-      <div className="mt-16 grid gap-14">
+      <div className="mt-12 grid gap-12 md:mt-16 md:gap-14">
         {SECTIONS.map((s, i) => (
           <Reveal key={s.heading} delay={i * 60}>
             <article className="grid gap-x-12 gap-y-4 border-t border-rule-strong pt-7 md:grid-cols-12">
-              <h2 className="m-0 max-w-[20ch] text-2xl leading-snug md:col-span-5">{s.heading}</h2>
+              <h2 className="m-0 text-2xl leading-snug md:col-span-5 md:max-w-[20ch]">{s.heading}</h2>
               <div className="grid gap-4 md:col-span-7">
                 {s.body.map((p) => (
                   <p key={p.slice(0, 24)} className="m-0 max-w-[62ch] text-ink-muted">
@@ -154,13 +154,13 @@ export default function RantPage() {
 
       {/* ── the closing box ──────────────────────────────────── */}
       <Reveal delay={60}>
-        <div className="mt-20 border border-rule-strong bg-paper-raised px-8 py-10 md:px-12 md:py-12">
+        <div className="mt-14 rounded-[10px] border border-rule-strong bg-paper-raised px-6 py-8 md:mt-20 md:px-12 md:py-12">
           <div className="grid gap-3">
             {["read the whole thing", "keep the loop small", "put the hard parts around it"].map(
               (line, i) => (
                 <p
                   key={line}
-                  className="m-0 flex items-baseline gap-4 font-serif text-2xl md:text-3xl"
+                  className="m-0 flex items-baseline gap-4 text-pretty font-serif text-[1.375rem] md:text-3xl"
                 >
                   <span aria-hidden="true" className="text-oxblood">
                     {i === 0 ? "Ω" : "›"}

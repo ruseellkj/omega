@@ -126,7 +126,7 @@ export default function RoadmapPage() {
   };
 
   return (
-    <section className={`py-16 md:py-20 ${GUTTER}`}>
+    <section className={`py-12 md:py-20 ${GUTTER}`}>
       <PageHeader eyebrow="roadmap" title="Three tiers closed.">
         <div className="mt-8 flex flex-wrap items-baseline gap-x-8 gap-y-3">
           {(["shipped", "next", "planned"] as const).map((k) => (
@@ -148,7 +148,7 @@ export default function RoadmapPage() {
         </p>
       </PageHeader>
 
-      <div className="mt-16 grid gap-16">
+      <div className="mt-12 grid gap-12 md:mt-16 md:gap-16">
         {TIERS.map((tier, ti) => (
           <Reveal key={tier.tier} delay={ti * 60}>
             <div className="border-t-2 border-rule-strong pt-7">
