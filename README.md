@@ -13,6 +13,7 @@
 </p>
 
 <p align="center">
+  <a href="https://omega-coding-agent.vercel.app"><b>Website</b></a> ·
   <a href="#quickstart">Quickstart</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#the-journey-tier-by-tier">The journey</a> ·
@@ -57,7 +58,14 @@ terminal UI, persistent sessions, compaction, prompt caching and browser sign-in
 
 ## Quickstart
 
-You need **Python 3.14** and [**uv**](https://docs.astral.sh/uv/).
+One line. It installs [**uv**](https://docs.astral.sh/uv/) if it is missing, puts omega in its own
+environment, checks the command it created, and never edits a shell rc file:
+
+```bash
+curl -fsSL https://omega-coding-agent.vercel.app/install.sh | sh
+```
+
+Already have uv? This is the install the script runs:
 
 ```bash
 uv tool install "git+https://github.com/ruseellkj/omega#subdirectory=omega"

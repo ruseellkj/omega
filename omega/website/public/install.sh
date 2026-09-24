@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# omega installer.  curl -fsSL https://omega-agent.vercel.app/install.sh | sh
+# omega installer.  curl -fsSL https://omega-coding-agent.vercel.app/install.sh | sh
 #
 # Shaped after Tau's (research/tau/website/static/install.sh, 72 lines), which
 # gets three things right and is worth copying rather than improvising:

@@ -25,7 +25,7 @@ destroys anything, and its provider abstraction is no longer a claim but a measu
 ## Install it
 
 ```bash
-curl -fsSL https://omega-agent.vercel.app/install.sh | sh
+curl -fsSL https://omega-coding-agent.vercel.app/install.sh | sh
 omega
 ```
 
