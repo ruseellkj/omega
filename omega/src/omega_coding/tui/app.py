@@ -46,9 +46,40 @@ agent emit one more event would snap it shut. Widgets are now updated in place a
 only appended when the transcript grows, which is the one thing a rebuild cannot
 be made to do.
 
+## Copying and pasting
+
+A Textual app turns on mouse reporting, so the terminal's own selection is gone:
+a drag goes to the app, and the terminal never sees it. Textual highlights the
+drag itself. Before this, the only way to copy that highlight was `ctrl+c`, which
+this app binds at priority to *stop*. So nothing could be copied at all. What
+replaced it:
+
+* **Selecting copies.** Mouse-up on a selection in the transcript
+  (`TextSelected`), a drag inside the prompt (`PromptInput.Selected`) and a
+  double- or triple-click all copy immediately, and the status line says how
+  much. `/config auto-copy off` turns it off.
+* **`ctrl+c` copies when something is selected**, and stops or exits only when
+  nothing is. That is the convention of terminals that give `ctrl+c` both jobs,
+  and it is what lets a selection "override all" without taking the stop key
+  away: the first press copies and clears, the next one stops.
+* **One chokepoint.** `copy_to_clipboard` is overridden, as Tau overrides it
+  (`tui/app.py:3495`). Every path, including `Input`'s own copy and cut,
+  reaches the system clipboard through `clipboard.py`, and none can copy from a
+  password field.
+* **A paste always lands.** One no input took is rerouted to the prompt. A click
+  returns focus to the prompt, as Tau's does (`tui/app.py:3663`). `ctrl+v`
+  reads the system clipboard rather than Textual's in-process string.
+* **A selection holds the view.** The transcript normally jumps to the bottom on
+  every event, which dragged the text out from under the mouse mid-turn. While
+  anything is selected, it stays put. It follows again the moment you type or
+  send, because any cursor move in the prompt clears the highlight
+  (`_input.py:518`). Tau's answer was the opposite: it turns
+  selection off while a turn runs (`tui/app.py:3488-3493`). That makes the
+  stream win over the user, and here the user asked for the reverse.
+
 ## What is deliberately not here
 
-* file drop, desktop notifications, a session picker, mouse selection
+* file drop, desktop notifications, a session picker
 * markdown rendering of assistant text, and a diff view for `edit_file` —
   the most obviously missing one
 """
@@ -60,14 +91,17 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.css.query import NoMatches
 from textual.theme import Theme as TextualTheme
-from textual.widgets import Footer, Static
+from textual.widgets import Footer, Input, Static
+from textual.widgets.input import Selection
 
 from omega_agent.harness import Harness
+from omega_coding import clipboard as clipboards
 from omega_coding.approval import ApprovalPolicy
 from omega_coding.commands import CommandContext, dispatch
 from omega_coding.tui import banner, config, themes
@@ -77,6 +111,7 @@ from omega_coding.tui.login import tui_choice_asker, tui_secret_asker
 from omega_coding.tui.state import Row, TuiState
 from omega_coding.tui.themes import TuiTheme
 from omega_coding.tui.widgets import (
+    ClipboardPaste,
     CommandPalette,
     InterruptBar,
     PromptBox,
@@ -84,6 +119,7 @@ from omega_coding.tui.widgets import (
     Splash,
     StatusBar,
     ToolRow,
+    Transcript,
     TranscriptRow,
     build_row,
 )
@@ -187,9 +223,16 @@ class OmegaApp(App[None]):
         provider_name: str = "fake",
         auto_approve: bool = False,
         confine: bool = False,
+        clipboard: clipboards.Clipboard | None = None,
     ) -> None:
         super().__init__()
         self.harness = harness
+        #: Where copies go and ctrl+v reads from. Injectable so no test can
+        #: touch the real one, see `tests/conftest.py`. **Not `_clipboard`**,
+        #: which is Textual's own in-process string and is kept in step below.
+        self._system_clipboard = clipboard if clipboard is not None else clipboards.system()
+        #: Whether selecting text copies it. `/config auto-copy` changes it.
+        self._auto_copy = config.load_auto_copy()
         self.state = TuiState()
         self.adapter = TuiEventAdapter(self.state)
         self._title = title
@@ -227,7 +270,7 @@ class OmegaApp(App[None]):
         # and the app name — which says nothing you did not already know from
         # typing `omega`. The facts worth a row are in the splash instead, where
         # they can be six lines wide and then get out of the way.
-        with VerticalScroll(id="transcript"):
+        with Transcript(id="transcript"):
             yield Splash(
                 self._facts(),
                 "/  commands    ↑  history    ctrl+o  expand    ctrl+c/ctrl+d  exit",
@@ -332,7 +375,11 @@ class OmegaApp(App[None]):
             self._rows.append(widget)
             pane.mount(widget)
 
-        pane.scroll_end(animate=False)
+        # **Not while something is selected.** Jumping to the bottom on every
+        # event pulled the text out from under a drag mid-turn. The selection
+        # wins, and the view follows the stream again once it is cleared.
+        if not pane.screen.selections:
+            pane.scroll_end(animate=False)
         self._refresh_status()
 
     def _refresh_status(self) -> None:
@@ -391,7 +438,7 @@ class OmegaApp(App[None]):
         field = self.query_one(PromptInput)
         # Markers back to the text they stand for, *before* anything else sees
         # the prompt — history, steering and the model must all get the real
-        # thing, not `[pasted #1 +57 lines]`.
+        # thing, not `[paste #1 +57 lines]`.
         text = field.expand_pastes(message.value).strip()
         message.input.value = ""
         self._palette().set_class(False, "visible")
@@ -441,6 +488,12 @@ class OmegaApp(App[None]):
         if text.startswith("/theme"):
             self._switch_theme(text[len("/theme") :].strip())
             return
+        # Matched on the whole word, unlike `/theme` above: a prefix match would
+        # route `/configure` here too.
+        name, _, argument = text.partition(" ")
+        if name == "/config":
+            self._configure(argument.strip())
+            return
         if self._commands is None:
             self.state.add("notice", "commands need a session; none was wired.", is_error=True)
             self.refresh_view()
@@ -475,6 +528,205 @@ class OmegaApp(App[None]):
                 self._rows[index].update_row(row, self._theme)
             self.state.add("notice", f"theme: {name}")
         self.refresh_view()
+
+    def _configure(self, argument: str) -> None:
+        """`/config` — settings for the screen, here for the reason `/theme` is.
+
+        One setting so far, `auto-copy`. `/config` lists it, `/config auto-copy`
+        flips it, and `/config auto-copy on|off` sets it. The copied-text notice
+        names this command, so it has to exist wherever that notice can appear.
+        """
+        setting, _, value = argument.partition(" ")
+        value = value.strip().lower()
+        if not setting:
+            state = "on" if self._auto_copy else "off"
+            self.state.add(
+                "notice",
+                f"settings:\n  auto-copy  {state:<4} copy text as soon as you select it"
+                "\nusage: /config auto-copy [on|off]",
+            )
+        elif setting != "auto-copy":
+            self.state.add(
+                "notice", f"no setting called {setting!r}. There is one: auto-copy.", is_error=True
+            )
+        elif value not in {"", "on", "off"}:
+            self.state.add("notice", "usage: /config auto-copy [on|off]", is_error=True)
+        else:
+            self._auto_copy = (not self._auto_copy) if not value else value == "on"
+            config.save_auto_copy(self._auto_copy)
+            self.state.add(
+                "notice",
+                "auto-copy: on — selecting text copies it"
+                if self._auto_copy
+                else "auto-copy: off — select text, then ctrl+c to copy it",
+            )
+        self.refresh_view()
+
+    # ------------------------------------------------------- copy and paste
+
+    def copy_to_clipboard(self, text: str) -> None:
+        """Every copy in the app arrives here. See "Copying and pasting" above.
+
+        Textual's own version only writes OSC 52 (`textual/app.py:1770`), which
+        macOS Terminal ignores. This one goes to the system clipboard first.
+        """
+        self._copy(text, auto=False)
+
+    def _copy(self, text: str, *, auto: bool) -> None:
+        """Copy `text`, unless it came out of a field holding a secret.
+
+        **The password rule lives here, not at each caller**, because
+        `Input.selected_text` on a `password=True` field is the real value.
+        Measured: `'sk-secret'`, not the dots on screen. A caller that forgot
+        would put an API key on the clipboard from the login modal.
+        """
+        focused = self.focused
+        if isinstance(focused, Input) and focused.password:
+            self._flash("not copied — that field holds a secret")
+            return
+        if not text:
+            return
+        # Textual's in-process copy, what ctrl+v falls back to when there is no
+        # system clipboard to read (over SSH, or on a bare Linux box).
+        self._clipboard = text
+        self.run_worker(self._deliver(text, auto=auto), group="clipboard")
+
+    async def _deliver(self, text: str, *, auto: bool) -> None:
+        """Native first, then OSC 52 if that failed or landed on the wrong machine.
+
+        The order and the cap are Pi's, and `clipboard.py` says why. The notice
+        says only what is known: "copied" when a tool confirmed it, "sent" when
+        the terminal was asked and may have declined.
+        """
+        backend = self._system_clipboard
+        native = await backend.write(text)
+        sent = False
+        if (backend.remote or not native) and clipboards.fits_osc52(text):
+            super().copy_to_clipboard(text)
+            sent = True
+
+        size = f"{len(text):,} char{'' if len(text) == 1 else 's'}"
+        if sent:
+            said = f"sent {size} to the terminal's clipboard"
+        elif native:
+            said = f"copied {size} to clipboard"
+        else:
+            self._flash(f"could not copy {size}: no clipboard tool, and too large for the terminal")
+            return
+        self._flash(f"{said} · disable auto-copy in /config" if auto else said)
+
+    def _flash(self, message: str) -> None:
+        """Say `message` on the status line, whichever screen is on top."""
+        # The main screen by index: with a modal up, `query_one` looks at the
+        # modal, which has no status line of its own.
+        with contextlib.suppress(NoMatches):
+            self.screen_stack[0].query_one(StatusBar).flash(message)
+
+    def _auto_copy_selection(self) -> None:
+        """Copy the screen's selection, if auto-copy is on and nothing is modal.
+
+        **Not on a modal.** A modal is a question, and the login modal is the one
+        screen with a secret on it. Selecting there still highlights, and ctrl+c
+        still copies, through the password rule above.
+        """
+        if not self._auto_copy or len(self.screen_stack) > 1:
+            return
+        text = self.screen.get_selected_text()
+        if text:
+            self._copy(text, auto=True)
+
+    def on_text_selected(self, event: events.TextSelected) -> None:
+        """Mouse-up after a drag in the transcript. Also sent after every plain
+        click, when there is nothing selected, which `_auto_copy_selection`
+        ignores."""
+        self._auto_copy_selection()
+
+    def on_prompt_input_selected(self, message: PromptInput.Selected) -> None:
+        """A drag inside the prompt. Screen selection never sees these —
+        measured: after a drag in an `Input`, `get_selected_text()` is None."""
+        if self._auto_copy:
+            self._copy(message.text, auto=True)
+
+    def on_click(self, event: events.Click) -> None:
+        """Double- and triple-click selections, and focus back to the prompt.
+
+        Textual makes those selections in `Widget._on_click` (`widget.py:4698`)
+        and posts no `TextSelected` for them, so they are caught here. The click
+        has bubbled up from the widget by now, so the selection already exists.
+        """
+        if len(self.screen_stack) > 1:
+            return
+        if event.chain >= 2:
+            self._auto_copy_selection()
+        # Not while the interrupt bar is asking: it holds focus so that `r` and
+        # `s` reach it, and a click must not quietly make them type instead.
+        if event.button == 1 and not self._interrupt().waiting:
+            with contextlib.suppress(NoMatches):
+                self.query_one(PromptInput).focus()
+
+    def on_paste(self, event: events.Paste) -> None:
+        """A paste no input took. It reaches here only by bubbling, because
+        `Input` stops the ones it handles."""
+        if len(self.screen_stack) > 1:
+            return
+        try:
+            field = self.query_one(PromptInput)
+        except NoMatches:
+            return
+        event.stop()
+        if not self._interrupt().waiting:
+            field.focus()
+        field.paste(event.text)
+
+    def on_clipboard_paste(self, message: ClipboardPaste) -> None:
+        """ctrl+v in the prompt or the key field. A worker, because reading the
+        clipboard runs a process."""
+        self.run_worker(self._paste_from_clipboard(message.field), group="clipboard")
+
+    async def _paste_from_clipboard(self, field: Input) -> None:
+        """Read the system clipboard into the field that asked.
+
+        **A password field never falls back** to Textual's in-process string:
+        that is whatever was last selected in omega, and it is never a key.
+        """
+        text = await self._system_clipboard.read()
+        if text is None and not field.password:
+            # No way to read the system clipboard (over SSH, or with no tool).
+            # What omega itself last copied is still better than nothing.
+            text = self.clipboard
+        if text is None:
+            self._flash("no clipboard to read here — use your terminal's own paste")
+            return
+        if not text:
+            self._flash("the clipboard is empty")
+            return
+        if not field.is_attached:
+            return  # the modal closed while the clipboard was being read
+        if isinstance(field, PromptInput):
+            field.paste(text)
+        else:
+            # What Textual's own paste does in a one-line field: the first line,
+            # over the selection (`_input.py:756-762`).
+            field.replace(text.splitlines()[0], *sorted(field.selection))
+
+    def _copy_selection(self) -> bool:
+        """ctrl+c's first job: copy whatever is selected. True if anything was.
+
+        The selection is cleared once copied, so the next ctrl+c stops or exits.
+        Otherwise a highlight left over from auto-copy would keep claiming the
+        key, and ctrl+c would never stop anything.
+        """
+        focused = self.focused
+        if isinstance(focused, Input) and not focused.selection.is_empty:
+            self.copy_to_clipboard(focused.selected_text)
+            focused.selection = Selection.cursor(focused.selection.end)
+            return True
+        text = self.screen.get_selected_text()
+        if text:
+            self.copy_to_clipboard(text)
+            self.screen.clear_selection()
+            return True
+        return False
 
     async def on_key(self, event: Any) -> None:
         """Route up/down: the palette first, then prompt history.
@@ -615,7 +867,13 @@ class OmegaApp(App[None]):
         first press arms and says so. Pi's footer advertises the same pairing —
         `ctrl+c/ctrl+d clear/exit`. Ctrl-D exits on the first press because that
         is what it means everywhere else and nobody presses it by reflex.
+
+        **A selection comes before all of it**: with text selected, ctrl+c
+        copies it and does nothing else. See `_copy_selection`.
         """
+        if self._copy_selection():
+            return
+
         if self.state.running:
             self.harness.cancel()
             self._exit_armed = False

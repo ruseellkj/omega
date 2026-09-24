@@ -10,12 +10,17 @@ possible, and that is the intended division.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 from textual import events
+from textual.containers import VerticalScroll
+from textual.widgets.input import Selection
 
+from conftest import RecordingClipboard  # the suite's own conftest
 from omega_agent.agent_events import AgentStartEvent, ToolExecutionStartEvent
 from omega_agent.harness import Harness
 from omega_agent.types import ToolCall
@@ -92,14 +97,15 @@ async def test_typing_a_slash_opens_the_list_of_commands(tmp_path: Path) -> None
 
 
 async def test_the_list_narrows_as_you_type(tmp_path: Path) -> None:
-    """Prefix match, so `/c` is always clear, compact, context in that order."""
+    """Prefix match, in `COMMANDS` order, so `/c` always lists the same five the
+    same way. `config` joined the list with `/config`."""
     app = _app(tmp_path)
     async with app.run_test() as pilot:
         await _type(pilot, app, "/c")
 
         palette = app.query_one(CommandPalette)
         shown = [palette.get_option_at_index(i).id for i in range(palette.option_count)]
-        assert shown == ["clear", "cost", "context", "compact"]
+        assert shown == ["clear", "cost", "context", "compact", "config"]
 
 
 async def test_the_list_closes_once_the_command_is_complete(tmp_path: Path) -> None:
@@ -291,6 +297,8 @@ async def test_a_big_paste_collapses_to_a_marker(tmp_path: Path) -> None:
     1,000 characters (`editor.ts:1198-1212`). omega collapses on *any* newline
     because its prompt is one line — a newline cannot be displayed here, so it
     has to be stood for rather than tidied away.
+
+    The wording is Pi's, `[paste #1 …]`, asked for by name. It was `[pasted #1 …]`.
     """
     app = _app(tmp_path)
     async with app.run_test() as pilot:
@@ -300,7 +308,7 @@ async def test_a_big_paste_collapses_to_a_marker(tmp_path: Path) -> None:
         field.post_message(events.Paste("a\nb\nc\nd"))
         await pilot.pause()
 
-        assert field.value == "[pasted #1 +4 lines]"
+        assert field.value == "[paste #1 +4 lines]"
         assert len(field.value) < 30, "the box stays readable"
 
 
@@ -315,6 +323,71 @@ async def test_a_short_single_line_paste_is_left_alone(tmp_path: Path) -> None:
         await pilot.pause()
 
         assert field.value == "src/omega_agent/loop.py"
+
+
+async def test_a_paste_replaces_the_selected_text(tmp_path: Path) -> None:
+    """**A bug the paste override introduced.** Textual's own `_on_paste` replaces
+    the selection (`widgets/_input.py:759-762` in 8.2.8); omega's override called
+    `insert_text_at_cursor`, so selecting a word and pasting over it put the
+    paste *beside* it and kept the word.
+    """
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        field = app.query_one(PromptInput)
+        field.focus()
+        field.value = "fix the bug in loop.py"
+        field.selection = Selection(12, 22)  # "in loop.py"
+        await pilot.pause()
+
+        field.post_message(events.Paste("in harness.py"))
+        await pilot.pause()
+
+        assert field.value == "fix the bug in harness.py"
+        assert field.cursor_position == len(field.value), "the cursor ends after the paste"
+
+
+async def test_coming_back_to_the_prompt_does_not_select_the_draft(tmp_path: Path) -> None:
+    """**`select_on_focus` defaults to True**, so every `.focus()` — after the
+    interrupt bar, after a modal, after a click elsewhere — selected the whole
+    draft, and the next keystroke replaced all of it. Measured before the fix:
+    `Selection(start=0, end=15)` after a refocus.
+    """
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        field = app.query_one(PromptInput)
+        field.value = "half a thought"
+        field.cursor_position = len(field.value)
+        app.query_one("#transcript").focus()
+        await pilot.pause()
+
+        field.focus()
+        await pilot.pause()
+
+        assert field.selection.is_empty, "the draft must not be selected"
+        await pilot.press("s")
+        assert field.value == "half a thoughts"
+
+
+async def test_a_paste_reaches_the_prompt_when_something_else_has_focus(
+    tmp_path: Path,
+) -> None:
+    """**Paste went to whatever was focused, and a click moves focus.** Textual
+    forwards a `Paste` only to the focused widget (`app.py:4142`), so clicking the
+    transcript and then pressing Cmd+V delivered it to a scroll view that has no
+    use for it. Nothing appeared and nothing said why. Tau reroutes the same way
+    (`tui/app.py:3637-3656`).
+    """
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        app.query_one("#transcript").focus()
+        await pilot.pause()
+
+        app.post_message(events.Paste("explain src/loop.py"))
+        await pilot.pause()
+
+        field = app.query_one(PromptInput)
+        assert field.value == "explain src/loop.py"
+        assert field.has_focus, "typing carries on where the paste went"
 
 
 async def test_the_prompt_sent_to_the_model_is_the_real_text(tmp_path: Path) -> None:
@@ -333,7 +406,473 @@ async def test_the_prompt_sent_to_the_model_is_the_real_text(tmp_path: Path) -> 
         sent = [row.text for row in app.state.rows if row.kind == "user"]
         assert sent, "the turn started"
         assert sent[0] == "first\nsecond — explain this"
-        assert "pasted #" not in sent[0]
+        assert "paste #" not in sent[0]
+
+
+async def test_pasting_the_same_text_twice_shows_it_in_full(tmp_path: Path) -> None:
+    """**The ask: "when pasted twice then it expands that to whole text".**
+
+    Neither reference does this. The rule chosen: pasting text whose marker is
+    still in the box replaces that marker with the text, cursor at its end. A
+    third paste collapses again, because there is no marker left to expand.
+    """
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        field = app.query_one(PromptInput)
+        field.focus()
+        pasted = "def f():\n    return 1"
+
+        field.post_message(events.Paste(pasted))
+        await pilot.pause()
+        assert field.value == "[paste #1 +2 lines]"
+        field.insert_text_at_cursor(" explain")
+
+        field.post_message(events.Paste(pasted))
+        await pilot.pause()
+        assert field.value == f"{pasted} explain", "the marker became the text, in place"
+        assert field.cursor_position == len(pasted), "the cursor ends after what expanded"
+
+        field.post_message(events.Paste(pasted))
+        await pilot.pause()
+        assert "[paste #2 +2 lines]" in field.value, "a third paste collapses again"
+        assert field.expand_pastes(field.value) == f"{pasted}{pasted} explain"
+
+
+async def test_an_expanded_paste_draws_its_line_breaks_as_glyphs(tmp_path: Path) -> None:
+    """`Input` put a raw `\\n` in its one-row strip (measured), which a real
+    terminal acts on. It must be drawn as `↵` and counted as one cell, both where
+    the cursor is drawn and where a click lands, or the two drift apart by one
+    cell per line break."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        field = app.query_one(PromptInput)
+        field.focus()
+        field.value = "ab\ncd\tef"
+        field.cursor_position = 6  # just before "e"
+        await pilot.pause()
+
+        drawn = field.render_line(0).text
+        assert "\n" not in drawn and "\t" not in drawn
+        assert drawn.startswith("ab↵cd⇥ef")
+        assert field.value == "ab\ncd\tef", "the value keeps the real characters"
+        assert field.cursor_screen_offset.x - field.content_region.x == 6
+
+        await pilot.click(field, offset=(4, 0))  # the "d"
+        assert field.cursor_position == 4
+
+
+async def test_backspace_takes_a_marker_whole(tmp_path: Path) -> None:
+    """One backspace used to leave `[paste #1 +2 lines`, which matches nothing,
+    so the paste was dropped and the fragment sent. Pi treats markers as one unit
+    (`editor.ts:34-35`)."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        field = app.query_one(PromptInput)
+        field.focus()
+        field.value = "see "
+        field.cursor_position = 4
+        field.post_message(events.Paste("a\nb"))
+        await pilot.pause()
+
+        await pilot.press("backspace")
+        assert field.value == "see "
+
+        field.post_message(events.Paste("a\nb"))
+        await pilot.pause()
+        field.cursor_position = 4
+        await pilot.press("delete")
+        assert field.value == "see "
+
+
+# ------------------------------------------------------------- copying
+
+
+async def _drag(pilot: Any, widget: Any, start: int, end: int) -> None:
+    """Press at `start`, move to `end`, release there — a mouse selection."""
+    await pilot.mouse_down(widget, offset=(start, 0))
+    await pilot.hover(widget, offset=(end, 0))
+    await pilot.mouse_up(widget, offset=(end, 0))
+    await pilot.pause()
+    await pilot.pause()  # the copy runs as a worker
+
+
+async def _with_answer(pilot: Any, app: OmegaApp, text: str) -> TranscriptRow:
+    app.state.add("assistant", text)
+    app.refresh_view()
+    await pilot.pause()
+    return app.query(TranscriptRow).last()
+
+
+async def test_selecting_transcript_text_copies_it_and_says_how_much(
+    tmp_path: Path, fake_clipboard: RecordingClipboard
+) -> None:
+    """**The ask: "any selected text should be automatically copied", with the
+    count on screen.** Before this, ctrl+c was the only copy key, and the app
+    binds it at priority to *stop*, so a highlight could not be copied at all."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        row = await _with_answer(pilot, app, "hello world from omega")
+
+        await _drag(pilot, row, 0, 11)
+
+        assert len(fake_clipboard.writes) == 1
+        copied = fake_clipboard.writes[0]
+        assert copied.startswith("hello world")
+        assert app.query_one(StatusBar).flashing == (
+            f"copied {len(copied)} chars to clipboard · disable auto-copy in /config"
+        )
+
+
+async def test_a_double_click_copies_the_whole_row(
+    tmp_path: Path, fake_clipboard: RecordingClipboard
+) -> None:
+    """Textual selects a whole widget on a double-click (`widget.py:4698`) and
+    posts no `TextSelected` for it, so a copy that listened only for that
+    missed it."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        row = await _with_answer(pilot, app, "the whole answer")
+
+        await pilot.click(row, offset=(2, 0), times=2)
+        await pilot.pause()
+        await pilot.pause()
+
+        assert fake_clipboard.writes[-1:] == ["the whole answer"]
+
+
+async def test_a_click_in_the_transcript_hands_the_keyboard_back(tmp_path: Path) -> None:
+    """Clicking the transcript moved focus to it, after which typing and pasting
+    both went nowhere. Tau returns focus to its prompt on click the same way
+    (`tui/app.py:3663-3675`)."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        row = await _with_answer(pilot, app, "an answer")
+
+        await pilot.click(row)
+        await pilot.press("x")
+
+        assert app.query_one(PromptInput).value == "x"
+
+
+async def test_a_drag_across_rows_leaves_the_keyboard_in_the_prompt(
+    tmp_path: Path, fake_clipboard: RecordingClipboard
+) -> None:
+    """A press focused the transcript pane, and a drag ending on another row
+    produces no `Click` to hand focus back (`app.py:4084-4116`). So after
+    selecting across two rows, typing went nowhere."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        first = await _with_answer(pilot, app, "first answer")
+        second = await _with_answer(pilot, app, "second answer")
+
+        await pilot.mouse_down(first, offset=(0, 0))
+        await pilot.hover(second, offset=(6, 0))
+        await pilot.mouse_up(second, offset=(6, 0))
+        await pilot.pause()
+        await pilot.pause()
+        await pilot.press("x")
+
+        assert "first answer" in fake_clipboard.writes[-1], "it copied across both rows"
+        assert app.query_one(PromptInput).value == "x"
+
+
+async def test_a_selection_holds_the_view_while_the_turn_streams(tmp_path: Path) -> None:
+    """Every event scrolled to the bottom, which pulled text out from under a
+    drag. While something is selected, the view stays put."""
+    app = _app(tmp_path)
+    async with app.run_test(size=(80, 20)) as pilot:
+        for index in range(30):
+            app.state.add("assistant", f"line {index}")
+        app.refresh_view()
+        await pilot.pause()
+        pane = app.query_one("#transcript", VerticalScroll)
+        pane.scroll_home(animate=False)
+        await pilot.pause()
+        row = app.query(TranscriptRow).first()
+        await _drag(pilot, row, 0, 4)
+        assert app.screen.selections, "the drag selected something"
+
+        app.state.add("assistant", "one more")
+        app.refresh_view()
+        # `scroll_end` lands after the next layout pass, not at once. Measured:
+        # `scroll_y` is still 0 after one pause and at the bottom after 0.2s, so a
+        # single pause here passed with the guard deleted.
+        await pilot.pause(0.2)
+
+        assert pane.scroll_y == 0, "the view did not jump to the bottom"
+
+
+async def test_dragging_inside_the_prompt_copies_it(
+    tmp_path: Path, fake_clipboard: RecordingClipboard
+) -> None:
+    """Screen selection never sees a drag inside an `Input`. Measured: after one,
+    `get_selected_text()` is None, so the prompt reports its own."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        field = app.query_one(PromptInput)
+        field.value = "draft text here"
+        await pilot.pause()
+
+        await _drag(pilot, field, 0, 5)
+
+        assert fake_clipboard.writes == ["draft"]
+
+
+async def test_auto_copy_turns_off_and_ctrl_c_still_copies(
+    tmp_path: Path, fake_clipboard: RecordingClipboard
+) -> None:
+    """**"All options should exist … but selecting should override all."** With
+    auto-copy off a drag only highlights. Then ctrl+c copies instead of stopping,
+    clears the highlight, and only the *next* ctrl+c means stop or exit."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        await _submit(pilot, app, "/config auto-copy off")
+        assert json.loads((tmp_path / "tui.json").read_text())["auto_copy"] is False
+
+        row = await _with_answer(pilot, app, "hello world from omega")
+        await _drag(pilot, row, 0, 11)
+        assert fake_clipboard.writes == [], "off means a drag only highlights"
+
+        await pilot.press("ctrl+c")
+        await pilot.pause()
+        assert len(fake_clipboard.writes) == 1
+        flashed = app.query_one(StatusBar).flashing
+        assert flashed.startswith("copied") and "/config" not in flashed
+        assert not app.screen.selections, "copied, then cleared"
+        assert not any("ctrl+c again" in row.text for row in app.state.rows)
+
+        await pilot.press("ctrl+c")
+        assert any("ctrl+c again" in row.text for row in app.state.rows)
+
+
+async def test_ctrl_c_copies_a_selection_in_the_prompt(
+    tmp_path: Path, fake_clipboard: RecordingClipboard
+) -> None:
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        field = app.query_one(PromptInput)
+        field.focus()
+        field.value = "abc def"
+        field.selection = Selection(0, 3)
+
+        await pilot.press("ctrl+c")
+        await pilot.pause()
+
+        assert fake_clipboard.writes == ["abc"]
+        assert field.selection.is_empty
+        assert field.value == "abc def"
+
+
+async def test_a_secret_is_never_copied(
+    tmp_path: Path, fake_clipboard: RecordingClipboard
+) -> None:
+    """**`selected_text` on a password field is the real value** — measured,
+    `'sk-secret'`, not the dots. So ctrl+c, cmd+c and cut in the login modal
+    must all be refused in the one place every copy passes through."""
+    from textual.widgets import Input
+
+    from omega_coding.tui.login import SecretModal
+
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        app.push_screen(SecretModal("API key"))
+        await pilot.pause()
+        secret = app.screen.query_one(Input)
+        secret.focus()
+        secret.value = "sk-secret"
+
+        for key in ("ctrl+c", "super+c", "ctrl+x"):
+            secret.selection = Selection(0, len(secret.value))
+            await pilot.press(key)
+            await pilot.pause()
+
+        assert fake_clipboard.writes == []
+        assert "sk-secret" not in app.clipboard
+
+
+async def test_ctrl_v_pastes_the_system_clipboard(
+    tmp_path: Path, fake_clipboard: RecordingClipboard
+) -> None:
+    """It pasted Textual's in-process string instead (`_input.py:1129`), which
+    held nothing unless omega itself had copied."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        fake_clipboard.contents = "line one\nline two"
+        field = app.query_one(PromptInput)
+        field.focus()
+
+        await pilot.press("ctrl+v")
+        await pilot.pause()
+        await pilot.pause()
+
+        assert field.value == "[paste #1 +2 lines]"
+        assert field.expand_pastes(field.value) == "line one\nline two"
+
+
+async def test_ctrl_v_falls_back_to_what_omega_copied(
+    tmp_path: Path, fake_clipboard: RecordingClipboard
+) -> None:
+    """With no way to read the system clipboard, say over SSH, what omega last
+    copied is what ctrl+v gives."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        app.copy_to_clipboard("from the transcript")
+        await pilot.pause()
+        fake_clipboard.contents = None
+        field = app.query_one(PromptInput)
+        field.focus()
+
+        await pilot.press("ctrl+v")
+        await pilot.pause()
+        await pilot.pause()
+
+        assert field.value == "from the transcript"
+
+
+async def test_ctrl_v_in_the_login_modal_pastes_the_real_key(
+    tmp_path: Path, fake_clipboard: RecordingClipboard
+) -> None:
+    """**A regression auto-copy created, caught in review before it shipped.**
+    The login modal's stock `Input` pastes Textual's in-process string on ctrl+v
+    (`_input.py:1129`). That string used to be empty, and auto-copy now fills it
+    on every selection. So select some transcript, copy a key in the browser,
+    `/login`, ctrl+v, and the transcript text went in as the credential, hidden
+    behind dots."""
+    from textual.widgets import Input
+
+    from omega_coding.tui.login import SecretModal
+
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        row = await _with_answer(pilot, app, "hello world from omega")
+        await _drag(pilot, row, 0, 11)
+        assert app.clipboard, "auto-copy filled the in-process clipboard"
+        fake_clipboard.contents = "sk-real-key\n"
+
+        app.push_screen(SecretModal("API key"))
+        await pilot.pause()
+        secret = app.screen.query_one(Input)
+        await pilot.press("ctrl+v")
+        await pilot.pause()
+        await pilot.pause()
+
+        assert secret.value == "sk-real-key"
+
+
+async def test_a_secret_field_never_falls_back_to_the_in_process_copy(
+    tmp_path: Path, fake_clipboard: RecordingClipboard
+) -> None:
+    """With no system clipboard to read, the prompt may use what omega copied.
+    A secret field may not: that text is never a key."""
+    from textual.widgets import Input
+
+    from omega_coding.tui.login import SecretModal
+
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        app.copy_to_clipboard("transcript text")
+        await pilot.pause()
+        fake_clipboard.contents = None
+
+        app.push_screen(SecretModal("API key"))
+        await pilot.pause()
+        await pilot.press("ctrl+v")
+        await pilot.pause()
+        await pilot.pause()
+
+        assert app.screen.query_one(Input).value == ""
+
+
+async def test_sending_a_prompt_lets_the_view_follow_again(tmp_path: Path) -> None:
+    """The auto-copy highlight holds the view still. Sending a prompt has to let
+    it go, or the answer streams in below the fold and omega looks frozen.
+
+    **Textual already does this, and no omega code does.** Any cursor move in
+    an `Input` calls `app.clear_selection()` (`_input.py:518`), and sending
+    empties the box, which moves the cursor. An explicit clear on submit was
+    written and then removed: with it deleted this test still passed, and a
+    probe showed the reset alone clears the selection. So this is the guard.
+    Type first, *then* select, then Enter with no keystroke between, because
+    that is the order where nothing else would have cleared it.
+
+    Writing this test found a different bug. A drag used to move focus to the
+    transcript, so the Enter never reached the prompt. See `Transcript`.
+    """
+    app = _app(tmp_path)
+    async with app.run_test(size=(80, 20)) as pilot:
+        for index in range(30):
+            app.state.add("assistant", f"line {index}")
+        app.refresh_view()
+        await pilot.pause()
+        pane = app.query_one("#transcript", VerticalScroll)
+        pane.scroll_home(animate=False)
+        await pilot.pause()
+        field = app.query_one(PromptInput)
+        field.value = "next question"
+        await pilot.pause()
+        await _drag(pilot, app.query(TranscriptRow).first(), 0, 4)
+        assert app.screen.selections, "selected after typing, nothing between"
+
+        await pilot.press("enter")
+        await pilot.pause(0.5)
+
+        assert not app.screen.selections
+        assert pane.scroll_y == pane.max_scroll_y, "the view followed the new answer"
+
+
+async def test_a_failed_copy_says_so_rather_than_claiming_it(
+    tmp_path: Path, fake_clipboard: RecordingClipboard
+) -> None:
+    """With no tool, OSC 52 is the only route, and nothing can confirm the
+    terminal honoured it. So the notice says "sent", never "copied"."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        fake_clipboard.ok = False
+        app.copy_to_clipboard("abc")
+        await pilot.pause()
+        await pilot.pause()
+
+        assert app.query_one(StatusBar).flashing == "sent 3 chars to the terminal's clipboard"
+        assert app.clipboard == "abc"
+
+
+async def test_the_copied_notice_outlasts_the_spinner(tmp_path: Path) -> None:
+    """The spinner repaints ten times a second, so a message written once would
+    be gone mid-turn in a tenth of a second."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        bar = app.query_one(StatusBar)
+        bar.show("thinking")
+        bar.flash("copied 3 chars to clipboard")
+
+        await pilot.pause(0.35)
+        assert "copied 3 chars" in str(bar.render())
+
+        bar.FLASH_SECONDS = 0.05
+        bar.flash("gone soon")
+        await pilot.pause(0.3)
+        assert "thinking" in str(bar.render()), "the spinner comes back underneath"
+
+
+async def test_config_lists_its_setting_and_refuses_unknown_ones(tmp_path: Path) -> None:
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        await _submit(pilot, app, "/config")
+        assert "auto-copy  on" in app.state.rows[-1].text
+
+        await _submit(pilot, app, "/config colour on")
+        assert app.state.rows[-1].is_error
+
+        await _submit(pilot, app, "/config auto-copy")
+        assert app.state.rows[-1].text.startswith("auto-copy: off"), "bare name flips it"
+
+
+async def _submit(pilot: Any, app: OmegaApp, text: str) -> None:
+    field = app.query_one(PromptInput)
+    field.value = text
+    await pilot.press("enter")
+    await pilot.pause()
+    await pilot.pause()
 
 
 # --------------------------------------------------------- the working line

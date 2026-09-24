@@ -10,7 +10,7 @@ shipping — he reads every line himself.
 
 | Directory | What it is |
 |---|---|
-| `omega/` | **the agent.** Three packages, 14,226 lines of `src/`, 713 tests. Tier 3 complete. |
+| `omega/` | **the agent.** Three packages, 14,996 lines of `src/`, 751 tests. Tier 3 complete. |
 | `dev-notes/` | the study notes — teardowns of the references, architecture decisions, concepts |
 | `research/pi/` | **reference 1**: Pi (TypeScript), `github.com/earendil-works/pi` |
 | `research/tau/` | **reference 2**: Tau (Python), `github.com/huggingface/tau` — a port of Pi |
@@ -25,7 +25,7 @@ references do this?" — never edit them.
 ```bash
 cd omega
 uv sync                             # install from the lockfile
-uv run pytest -q                    # 713 tests, ~35s, fully offline
+uv run pytest -q                    # 751 tests, ~45s, fully offline
 uv run mypy --strict src            # must be clean
 uv run ruff check .                 # must be clean
 uv run python -m omega_coding.evals # smoke eval, 4/4, no network
@@ -74,7 +74,7 @@ If a change would grow `loop.py`, it almost certainly belongs behind a hook inst
 
 ## Reading the code
 
-`omega/READING-ORDER.md` gives all 52 files in dependency order with one line each. Start there,
+`omega/READING-ORDER.md` gives all 53 files in dependency order with one line each. Start there,
 not with `ls`. `omega/TIER-1.md`, `TIER-2.md` and `TIER-3.md` record what each tier has and lacks;
 `omega/PRODUCT-BACKLOG.md` holds what comes after the tiers.
 
@@ -143,8 +143,12 @@ Since then, product work — recorded in `omega/PRODUCT-BACKLOG.md`, not on the 
 
 - a Textual terminal UI, now the default; `--repl` gives the plain one. It needed no new agent
   events: it reads the same ten the REPL does
-- thirteen `/` commands and a `!` shell escape, routed through `execute_tool_call` so the escape
+- fourteen `/` commands and a `!` shell escape, routed through `execute_tool_call` so the escape
   meets the approval gate
+- copy and paste: selecting text copies it (`/config auto-copy off` to stop), `ctrl+c` copies a
+  selection before it stops anything, and `omega_coding/clipboard.py` reaches the real clipboard
+  (`pbcopy` first, OSC 52 over SSH). A big paste folds to `[paste #1 +N lines]`; pasting it again
+  expands it
 - `/login`: browser sign-in for a Claude or ChatGPT subscription, or an API key, stored in
   `~/.omega/auth.json` at `0600`
 - `omega_coding/models.py`: built-in context windows read from models.dev, `/model refresh` to

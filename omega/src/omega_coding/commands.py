@@ -618,6 +618,20 @@ async def _theme(context: CommandContext) -> Outcome:
     return "handled"
 
 
+async def _config(context: CommandContext) -> Outcome:
+    """Listed for `/help` and the palette, handled in the UI, like `/theme`.
+
+    Its one setting, auto-copy, is about mouse selection, and the print REPL
+    leaves selection to the terminal, which already copies. So there is nothing
+    for it to configure here. `tui/app.py:_configure` is the real one.
+    """
+    context.emit(
+        "\n  /config holds the terminal UI's settings, and this is the print REPL."
+        "\n  Run omega without --repl to use it.\n"
+    )
+    return "handled"
+
+
 async def _exit(context: CommandContext) -> Outcome:
     return "exit"
 
@@ -790,6 +804,12 @@ COMMANDS: tuple[Command, ...] = (
     Command("compact", "/compact [pct]", "shrink the conversation now", _compact),
     Command("rewind", "/rewind [n]", "go back before your last question", _rewind),
     Command("theme", "/theme [name]", "change the colours (terminal UI only)", _theme),
+    Command(
+        "config",
+        "/config [setting]",
+        "settings such as auto-copy (terminal UI only)",
+        _config,
+    ),
     Command(
         "model",
         "/model [name|refresh]",

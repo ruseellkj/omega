@@ -43,8 +43,46 @@ from pathlib import Path
 
 import pytest
 
-from omega_coding import models
+from omega_coding import clipboard, models
 from omega_coding.tui import config
+
+
+class RecordingClipboard:
+    """A clipboard that is a list. What every test gets instead of the real one.
+
+    `writes` is every copy, in order. `contents` is what a read returns. `ok`
+    and `remote` let a test be a machine whose tool failed, or an SSH session.
+    """
+
+    def __init__(self) -> None:
+        self.writes: list[str] = []
+        self.contents: str | None = None
+        self.ok = True
+        self.remote = False
+
+    async def write(self, text: str) -> bool:
+        self.writes.append(text)
+        if self.ok:
+            self.contents = text
+        return self.ok
+
+    async def read(self) -> str | None:
+        return self.contents
+
+
+@pytest.fixture(autouse=True)
+def fake_clipboard(monkeypatch: pytest.MonkeyPatch) -> RecordingClipboard:
+    """**The fourth thing a test could leave on the laptop: the clipboard.**
+
+    Same rule as the files above, and a worse failure if broken. A test that
+    selected transcript text would run `pbcopy` and silently replace whatever
+    the developer had copied, with no file anywhere to show it happened.
+    `test_clipboard.py` checks that an app built with no clipboard argument
+    gets this one.
+    """
+    fake = RecordingClipboard()
+    monkeypatch.setattr(clipboard, "system", lambda: fake)
+    return fake
 
 
 @pytest.fixture(autouse=True)

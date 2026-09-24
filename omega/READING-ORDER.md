@@ -1,6 +1,6 @@
 # Reading omega
 
-Fifty-two files across three packages. This is the order to read them in, and
+Fifty-three files across three packages. This is the order to read them in, and
 one line on each saying what it is.
 
 **Read package by package, in dependency order.** `omega_agent` imports nothing
@@ -71,28 +71,29 @@ neither imports it.
 | 22 | `builtin_tools.py` | 812 | The four tools — read, write, edit, run — sitting behind everything above. |
 | 23 | `approval.py` | 374 | **The gate.** Fills `before_tool_call`. Note what it refuses outright versus what it asks about, and why the line is drawn where it is. |
 | 24 | `redact.py` | 194 | Keeps credentials out of the transcript. Fills `after_tool_call`. |
-| 24b | `commands.py` | 884 | **The command channel.** `/help`, `/clear`, `!cmd` — what tells the *program* something instead of asking the model. Note `dispatch` returns three things, and that `!cmd` reuses `execute_tool_call` rather than the shell. |
+| 24b | `commands.py` | 904 | **The command channel.** `/help`, `/clear`, `!cmd` — what tells the *program* something instead of asking the model. Note `dispatch` returns three things, and that `!cmd` reuses `execute_tool_call` rather than the shell. |
 | 25 | `history.py` | 42 | **Two views of history**: what is kept versus what is sent. The small sibling of the seam compaction will use at Tier 3. |
 | 26 | `context.py` | 187 | How full the context window is. Measures the problem `compact.py` fixes. |
 | 26b | `eventlog.py` | 160 | **Tier 3.** The second listener. Writes assembled messages, never deltas. |
 | 26c | `subagent.py` | 185 | **Tier 3.** A nested agent, as a tool calling `run_headless`. |
 | 26d | `tui/state.py` | 241 | **Tier 3.** What the screen shows. Imports no Textual. |
 | 26e | `tui/adapter.py` | 130 | **Tier 3.** The 10 agent events -> screen state. |
-| 26f | `tui/app.py` | 793 | **Tier 3.** The screen. Steering becomes typeable here. |
+| 26f | `tui/app.py` | 1,051 | **Tier 3.** The screen. Steering becomes typeable here. Read "Copying and pasting" for why `ctrl+c` copies before it stops. |
 | 26g | `session/tree.py` | 101 | **Tier 3.** The transcript is a tree. `path_to`, `leaves`, cycle detection. |
 | 26a | `compact.py` | 377 | **Tier 3.** Fills `transform_context`. Cuts on turn boundaries so a tool call is never orphaned. |
 | 27 | `cost.py` | 123 | What the run cost. Read why it ships **no price table**. |
 | 28 | `headless.py` | 125 | Run the agent with no keyboard. Also the benchmark interface, and at Tier 3+ a subagent is this function called from a tool. |
 | 29 | `evals.py` | 137 | Does the assembled agent still work? Not a test — read the docstring on the difference. |
-| 26h | `tui/widgets.py` | 540 | **Tier 3.** Every widget the screen is built from. The prompt box is the interesting one — see why `compact=True` was load-bearing. |
+| 26h | `tui/widgets.py` | 766 | **Tier 3.** Every widget the screen is built from. The prompt box is the interesting one — see why `compact=True` was load-bearing, and why a newline is drawn as `↵`. |
 | 26i | `tui/banner.py` | 272 | The wordmark, the mascot, the startup facts, the compact header. Read why the splash shrinks rather than staying. |
 | 26j | `tui/themes/__init__.py` | 267 | Nine colours, four roles, loaded from JSON. A `border` of `""` means no rule — which is why rows have no vertical bar. |
 | 26k | `tui/approval.py` | 146 | The gate, on screen. `push_screen_wait` needs a worker; that constraint shaped the caller. |
-| 26l | `tui/login.py` | 146 | Asking for a secret without ever showing it, and the provider/method pickers. `password=True` is the whole security surface. |
-| 26m | `tui/config.py` | 54 | Which theme you chose, remembered. |
+| 26l | `tui/login.py` | 161 | Asking for a secret without ever showing it, and the provider/method pickers. `password=True` is the whole security surface, and `SecretInput` is why ctrl+v cannot paste transcript text as a key. |
+| 26m | `tui/config.py` | 81 | Which theme you chose, and whether selecting text copies it, remembered. |
 | 24c | `env.py` | 86 | Finds `.env` by walking outward from where you are, nearest first. |
 | 24d | `system_prompt.py` | 125 | The standing instructions, and `OMEGA.md`. |
 | 24e | `status.py` | 316 | The working line, with labels that are true rather than generic. |
+| 24f | `clipboard.py` | 224 | The system clipboard: the platform's own tool first, OSC 52 only when that fails or the session is remote. Pi's order and Pi's cap. Read why "copied" and "sent" are different words. |
 | 26n | `auth.py` | 384 | **Where a credential lives**, and the resolution order — `auth.json` → environment → nothing, reversed to follow Pi. Also `LoginRequiredProvider`, the provider that cannot answer and says why. |
 | 26o | `oauth.py` | 519 | Signing in with an account. PKCE, a loopback listener, the exchange, renewal — and the argument about whose client id omega presents. **Read the docstring before the code.** |
 | 26p | `models.py` | 560 | Which models each provider offers and how big their windows are. Three layers: built-ins, a models.dev refresh cache, and your own `models.json` on top. The single source `/model` and the compactor both read. |

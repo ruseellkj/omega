@@ -295,6 +295,22 @@ trivial and is not, once HTML, Markdown and transcript fidelity are all in scope
 
 ---
 
+## 6 · The prompt box
+
+| Item | Reference | omega today |
+|---|---|---|
+| Multi-line prompt | Tau: `class PromptInput(TextArea)`, `tui/app.py:476`. Pi: `tui/src/components/editor.ts`, 2,351 lines | a one-row `Input` |
+| Copy and paste | Tau: `auto_copy_selection`, `tui/app.py:3677-3689`. Pi: `utils/clipboard.ts` | **done**: auto-copy on selection, `ctrl+c` copies a selection first, `clipboard.py`, `/config` |
+
+**The multi-line prompt is what copy and paste left undone.** Pasting the same text twice now
+expands its `[paste #N …]` marker into the real text. In a one-row box that text is one long line
+with its breaks drawn as `↵`: correct, but not pleasant to edit. Both references have a real editor
+behind the prompt. A `TextArea` would change what Enter means, how up and down reach history, and
+every `on_input_*` handler in `tui/app.py`, which is why it is its own item rather than part of the
+paste work.
+
+---
+
 ## Explicitly not planned, at any tier
 
 - **MCP** — neither reference implements it.

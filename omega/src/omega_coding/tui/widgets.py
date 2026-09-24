@@ -26,13 +26,15 @@ everything — and the row stops being a lossy summary.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
+from rich.cells import cell_len, get_character_cell_size
 from rich.style import Style
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.timer import Timer
 from textual.widgets import Collapsible, Input, OptionList, Static
@@ -141,6 +143,25 @@ class ToolRow(Collapsible):
 def build_row(row: Row, theme: TuiTheme) -> TranscriptRow | ToolRow:
     """One row of state becomes one widget. The only place that mapping lives."""
     return ToolRow(row, theme) if row.kind == "tool" else TranscriptRow(row, theme)
+
+
+class Transcript(VerticalScroll):
+    """The scrolling pane of rows, which a mouse press never focuses.
+
+    **A drag used to take the keyboard away from the prompt.** A press focuses
+    the nearest focusable ancestor of whatever is under it (`screen.py:1934`).
+    For a row, that is this pane. Textual only turns a press and release into a
+    `Click` when both land on the same widget (`app.py:4084-4116`), so a drag
+    from one row to another left focus here, with nothing to hand it back. The
+    next keystroke, and the Enter after it, went to a scroll view. Found by a
+    test whose prompt was never sent.
+
+    `focus_on_click` is Textual's switch for exactly this. The pane stays
+    focusable, so Tab still reaches it for keyboard scrolling.
+    """
+
+    def focus_on_click(self) -> bool:
+        return False
 
 
 class CommandPalette(OptionList):
@@ -269,8 +290,24 @@ class Splash(Vertical):
         yield Static(f"[dim]{self._hint}[/dim]", id="hint")
 
 
+class ClipboardPaste(Message):
+    """ctrl+v in `field`: the app should read the system clipboard into it.
+
+    **One message for every field that pastes**, the prompt and the login
+    modal's key alike. The stock `Input.action_paste` pastes Textual's
+    in-process string (`_input.py:1129`), which auto-copy fills with whatever was
+    last selected. In the key field that meant transcript text went in as the
+    credential, hidden behind dots. Found in review, and it is why the field
+    that asked travels with the message.
+    """
+
+    def __init__(self, field: Input) -> None:
+        super().__init__()
+        self.field = field
+
+
 class PromptInput(Input):
-    """The text field, with the one Textual behaviour that had to change.
+    """The text field, and every Textual behaviour that had to change for it.
 
     **Pasting more than one line silently kept only the first.** Textual's
     `Input._on_paste` is `event.text.splitlines()[0]` (8.2.8,
@@ -284,55 +321,136 @@ class PromptInput(Input):
     line structure — which is exactly what matters when the thing pasted is code
     or a traceback.
 
-    **Both references solve it the same way, and so does the editor you are
-    reading this in:** collapse a large paste to a short marker, keep the real
-    text, and expand it again on submit.
+    **Both references solve it the same way:** collapse a large paste to a short
+    marker, keep the real text, and expand it again on submit.
 
     | | threshold | marker |
     |---|---|---|
     | Tau (`tui/app.py:473,679-694`) | 2,000 chars | `[Pasted content #N: 12,345 chars, 67 lines]` |
     | Pi (`tui/.../editor.ts:1198-1212`) | 10 lines or 1,000 chars | `[paste #1 +123 lines]` |
-    | omega | **any newline**, or 500 chars | `[pasted #1 +57 lines]` |
+    | omega | **any newline**, or 500 chars | `[paste #1 +57 lines]` |
 
     omega's line threshold is stricter than either because its prompt is a
-    single-line `Input`: a newline cannot be *displayed* here, so it must be
-    collapsed rather than merely tidied. Pi and Tau both have multi-line editors
-    and can afford to wait for the tenth line.
+    single-line `Input`, where a newline has nowhere to go. Pi and Tau both have
+    multi-line editors and can afford to wait for the tenth line. The marker
+    wording is Pi's. It was `[pasted #1 …]` until it was asked for as
+    `[paste 1…]`.
 
-    ## What this does not fix
+    ## Pasting the same thing twice shows it in full
 
-    `ctrl+v` still does not read the system clipboard, and cannot be made to.
-    Textual's `action_paste` reads `App.clipboard` — an in-process string whose
-    only writer is `copy_to_clipboard` (`app.py:1780`). Real pasting arrives
-    through the terminal's bracketed-paste as a `Paste` event, which is what this
-    handles, so **Cmd+V works and ctrl+v is a different, in-app thing**.
+    **Neither reference does this.** Pi and Tau only ever collapse. The rule:
+    *paste text whose marker is still in the box, and that marker is replaced by
+    the text itself*, with the cursor at its end. So the first paste keeps the
+    box readable, and the second paste is "no, show me". Three consequences,
+    stated because each could surprise:
+
+    - A second paste over a *selection* replaces the selection, as any paste
+      does. Expanding needs an empty selection.
+    - Once expanded, there is no marker left, so a third paste of the same text
+      collapses again, as `#2`.
+    - An expanded paste is real text in the box, so the box draws its line
+      breaks as `↵` (see below) and history remembers it expanded.
+
+    ## Drawing a newline in a one-row box
+
+    `Input` renders a newline as a raw `\\n` inside a one-row strip (measured:
+    `'one\\ntwo\\nthree   …'`), which a real terminal would act on and tear the
+    screen with. Tabs were already wrong: drawn eight cells wide while the cursor
+    maths counts four (measured: `'a       b'` with the cursor at cell 6). Both
+    are drawn as one-cell glyphs, `↵` and `⇥`, and the three methods that
+    turn text into cells agree on that. **The value keeps the real characters**,
+    so what is sent, copied or recalled is never the glyph.
+
+    ## Markers are one unit
+
+    Backspace at the end of a marker deletes the whole marker, as Pi's editor
+    treats them as atomic (`editor.ts:34-35`, "paste markers as single units").
+    Without it one backspace turns `[paste #1 +4 lines]` into `[paste #1 +4 lines`,
+    which no longer matches, so the paste is silently dropped and the fragment
+    is sent in its place.
+
+    ## Where the clipboard comes in
+
+    `ctrl+v` used to paste Textual's in-process string (`action_paste` reads
+    `App.clipboard`, `_input.py:1129`), which is not the system clipboard. It now
+    asks the app, which owns `clipboard.py`, and the text comes back through
+    `paste` like any other. A drag inside the box posts `Selected` for the app to
+    copy. The widget knows neither how to reach a clipboard nor whether
+    auto-copy is on.
     """
 
     #: Collapse anything with a newline, or longer than this.
     COLLAPSE_CHARS = 500
 
+    #: How the one-row box draws characters it cannot show. One cell each.
+    GLYPHS = {"\n": "↵", "\t": "⇥"}
+    _SHOWN = str.maketrans(GLYPHS)
+
+    #: The marker's shape, for finding every one in a single pass.
+    MARKER = re.compile(r"\[paste #\d+ [^\]]+\]")
+
+    class Selected(Message):
+        """The mouse finished selecting text inside the box."""
+
+        def __init__(self, text: str) -> None:
+            super().__init__()
+            self.text = text
+
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        #: marker number -> the text it stands for.
-        self.pastes: dict[int, str] = {}
+        #: marker -> the text it stands for.
+        self.pastes: dict[str, str] = {}
+        self._paste_count = 0
+        self._dragging = False
+
+    # ------------------------------------------------------------------ paste
 
     def _on_paste(self, event: events.Paste) -> None:
-        text = event.text
-        if not text:
+        if not event.text:
             return
         event.stop()
         event.prevent_default()
+        self.paste(event.text)
 
-        lines = text.splitlines()
-        if len(lines) <= 1 and len(text) <= self.COLLAPSE_CHARS:
-            # Small and flat: behave exactly as Textual would have.
-            self.insert_text_at_cursor(text)
+    def action_paste(self) -> None:
+        self.post_message(ClipboardPaste(self))
+
+    def paste(self, text: str) -> None:
+        """One paste, from wherever it came: Cmd+V, ctrl+v, or a reroute.
+
+        Line endings are normalised first. A Windows clipboard's `\\r\\n` would
+        otherwise leave a `\\r` in the value, and the provider would receive it.
+        """
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        if not text:
+            return
+        start, end = sorted(self.selection)
+
+        if start == end:
+            marker = self._marker_holding(text)
+            if marker is not None:
+                at = self.value.rfind(marker)
+                self.replace(text, at, at + len(marker))
+                return
+
+        if "\n" not in text and len(text) <= self.COLLAPSE_CHARS:
+            # Small and flat: what Textual would have done, selection included.
+            self.replace(text, start, end)
             return
 
-        number = len(self.pastes) + 1
-        self.pastes[number] = text
-        measure = f"+{len(lines)} lines" if len(lines) > 1 else f"{len(text):,} chars"
-        self.insert_text_at_cursor(f"[pasted #{number} {measure}]")
+        self._paste_count += 1
+        lines = text.count("\n") + 1
+        measure = f"+{lines} lines" if lines > 1 else f"{len(text):,} chars"
+        marker = f"[paste #{self._paste_count} {measure}]"
+        self.pastes[marker] = text
+        self.replace(marker, start, end)
+
+    def _marker_holding(self, text: str) -> str | None:
+        """The newest marker for exactly `text` that is still in the box."""
+        for marker, held in reversed(self.pastes.items()):
+            if held == text and marker in self.value:
+                return marker
+        return None
 
     def expand_pastes(self, value: str) -> str:
         """Put the real text back before the prompt is sent.
@@ -341,18 +459,77 @@ class PromptInput(Input):
         shadowing it with a method is the same mistake `_context` was — caught
         the same way, by `mypy --strict` before anything ran.
 
-        Markers are replaced by what they stood for; anything the user deleted
-        simply never matches. `pastes` is *not* cleared — a prompt recalled from
-        history with the up-arrow still carries its markers, and they have to
-        resolve the second time too.
+        One pass with one pattern, not a `replace` per marker: pasted text that
+        happens to contain a marker must come out as it went in, rather than
+        being expanded a second time. `pastes` is *not* cleared — a prompt
+        recalled from history with the up-arrow still carries its markers, and
+        they have to resolve the second time too.
         """
-        for number, text in self.pastes.items():
-            for measure in (
-                f"+{len(text.splitlines())} lines",
-                f"{len(text):,} chars",
-            ):
-                value = value.replace(f"[pasted #{number} {measure}]", text)
-        return value
+        return self.MARKER.sub(lambda hit: self.pastes.get(hit.group(0), hit.group(0)), value)
+
+    # ------------------------------------------------------ markers as a unit
+
+    def _marker_span(
+        self, *, ending: int | None = None, starting: int | None = None
+    ) -> tuple[int, int] | None:
+        """The marker that ends at `ending`, or starts at `starting`, if any."""
+        for marker in self.pastes:
+            if ending is not None and self.value[max(0, ending - len(marker)) : ending] == marker:
+                return ending - len(marker), ending
+            if starting is not None and self.value[starting : starting + len(marker)] == marker:
+                return starting, starting + len(marker)
+        return None
+
+    def action_delete_left(self) -> None:
+        span = self._marker_span(ending=self.cursor_position) if self.selection.is_empty else None
+        if span is None:
+            super().action_delete_left()
+        else:
+            self.delete(*span)
+
+    def action_delete_right(self) -> None:
+        span = self._marker_span(starting=self.cursor_position) if self.selection.is_empty else None
+        if span is None:
+            super().action_delete_right()
+        else:
+            self.delete(*span)
+
+    # ------------------------------------------------------- mouse selection
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        # Runs before `Input._on_mouse_down` starts its own drag — handlers go
+        # subclass first (`message_pump.py:758`). A flag of our own rather than
+        # reading Input's private `_selecting`.
+        self._dragging = True
+
+    def on_mouse_up(self, event: events.MouseUp) -> None:
+        dragged, self._dragging = self._dragging, False
+        if dragged and not self.selection.is_empty and not self.password:
+            self.post_message(self.Selected(self.selected_text))
+
+    # ------------------------------------------------------------- drawing
+
+    @property
+    def _value(self) -> Text:
+        shown = Text(self.value.translate(self._SHOWN), no_wrap=True, overflow="ignore", end="")
+        for index, char in enumerate(self.value):
+            if char in self.GLYPHS:
+                shown.stylize("dim", index, index + 1)
+        return shown
+
+    def _position_to_cell(self, position: int) -> int:
+        return cell_len(self.value[:position].translate(self._SHOWN))
+
+    def _cell_offset_to_index(self, offset: int) -> int:
+        cell = 0
+        scroll_x, _ = self.scroll_offset
+        offset += scroll_x
+        for index, char in enumerate(self.value.translate(self._SHOWN)):
+            width = get_character_cell_size(char)
+            if cell <= offset < cell + width:
+                return index
+            cell += width
+        return max(0, min(offset, len(self.value)))
 
 
 class PromptBox(Horizontal):
@@ -393,10 +570,16 @@ class PromptBox(Horizontal):
         # (`widgets/_input.py:190-196`), and the result was a second, heavier
         # frame drawn inside this one — the "half cut" box. `compact` is the
         # supported switch for a one-row, borderless field (`_input.py:283`).
+        #
+        # `select_on_focus=False`: Textual's default selects the whole value on
+        # every focus (`_input.py:738`), so coming back to the box from a click,
+        # a modal or the interrupt bar left the draft selected, and the next key
+        # replaced all of it.
         yield PromptInput(
             placeholder="Ask anything, or / for commands",
             id="prompt",
             compact=True,
+            select_on_focus=False,
         )
 
 
@@ -415,6 +598,16 @@ class StatusBar(Static):
 
     Frames come from `status.FRAMES` — the same braille sequence the print REPL's
     status line uses, so the two surfaces animate identically.
+
+    ## A flash outranks both
+
+    `flash` is the one-line answer to something you just did: "copied 152 chars
+    to clipboard". It holds the row for `FLASH_SECONDS`, and it has to beat the
+    spinner. `_tick` repaints ten times a second, so a message written once
+    would be gone in a tenth of a second mid-turn. So every paint asks about the
+    flash first, and whatever the row held underneath comes back when it
+    expires. **Not a transcript notice**: a row per copy is how a transcript
+    fills up with omega talking about itself.
     """
 
     DEFAULT_CSS = """
@@ -424,13 +617,20 @@ class StatusBar(Static):
         padding: 0 2;
         color: $text-muted;
     }
+    StatusBar.-flash { color: $primary; }
     """
+
+    #: How long a flash holds the row.
+    FLASH_SECONDS = 4.0
 
     def __init__(self) -> None:
         super().__init__("")
         self._frame = 0
         self._timer: Timer | None = None
         self._label = ""
+        self._trailing = ""
+        self._flash = ""
+        self._flash_timer: Timer | None = None
 
     def on_mount(self) -> None:
         self._timer = self.set_interval(0.1, self._tick, pause=True)
@@ -445,16 +645,42 @@ class StatusBar(Static):
     def clear(self, trailing: str = "") -> None:
         """Stop spinning. `trailing` survives — the token count, typically."""
         self._label = ""
+        self._trailing = trailing
         if self._timer is not None:
             self._timer.pause()
-        self.update(f"[dim]{trailing}[/dim]" if trailing else "")
+        self._paint()
+
+    def flash(self, message: str) -> None:
+        """Say `message` for a few seconds, over whatever the row holds."""
+        self._flash = message
+        if self._flash_timer is not None:
+            self._flash_timer.stop()
+        self._flash_timer = self.set_timer(self.FLASH_SECONDS, self._end_flash)
+        self._paint()
+
+    @property
+    def flashing(self) -> str:
+        """The message being flashed, or `""`."""
+        return self._flash
+
+    def _end_flash(self) -> None:
+        self._flash = ""
+        self._paint()
 
     def _tick(self) -> None:
         self._frame = (self._frame + 1) % len(FRAMES)
         self._paint()
 
     def _paint(self) -> None:
-        self.update(f"{FRAMES[self._frame]} {self._label}")
+        self.set_class(bool(self._flash), "-flash")
+        if self._flash:
+            # `Text`, not a string: a flash is never markup, and one that
+            # happened to contain `[` must not be parsed as a style.
+            self.update(Text(self._flash))
+        elif self._label:
+            self.update(f"{FRAMES[self._frame]} {self._label}")
+        else:
+            self.update(f"[dim]{self._trailing}[/dim]" if self._trailing else "")
 
 
 class InterruptBar(Static):

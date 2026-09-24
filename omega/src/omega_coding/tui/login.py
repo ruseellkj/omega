@@ -20,6 +20,21 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Input, Label, OptionList, Static
 
+from omega_coding.tui.widgets import ClipboardPaste
+
+
+class SecretInput(Input):
+    """The key field: a stock masked `Input` whose ctrl+v reads the real clipboard.
+
+    The stock `ctrl+v` pastes Textual's in-process string, which auto-copy fills
+    with whatever was last selected. So it is the one place transcript text
+    could have gone in as a credential. The app pastes the system clipboard here
+    instead, and never falls back to that string for a password field.
+    """
+
+    def action_paste(self) -> None:
+        self.post_message(ClipboardPaste(self))
+
 
 class SecretModal(ModalScreen[str | None]):
     """One masked field. Enter accepts, Escape cancels."""
@@ -46,7 +61,7 @@ class SecretModal(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
             yield Label(self.prompt, id="asking")
-            yield Input(password=True, placeholder="paste here — it stays hidden")
+            yield SecretInput(password=True, placeholder="paste here — it stays hidden")
             yield Static(
                 "Stored in ~/.omega/auth.json, readable only by you. "
                 "Escape cancels and stores nothing.",

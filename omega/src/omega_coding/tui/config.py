@@ -1,13 +1,14 @@
 """What the UI remembers between runs.
 
-One setting so far — the theme. It lives in `~/.omega/tui.json` rather than in
-the session file because it is about *you*, not about a conversation: switching
-theme and then resuming a session should not switch it back.
+Two settings: the theme, and whether selecting text copies it. They live in
+`~/.omega/tui.json` rather than in the session file because they are about
+*you*, not about a conversation: switching theme and then resuming a session
+should not switch it back.
 
 **Deliberately its own file and not part of a general settings system.** omega
-has no config file (`TIER-3-PLUS.md` records that as future work), and inventing
-one to hold a single string would be building the general case before there is a
-second instance of it. When settings arrive, this is one key to move.
+has no config file (`PRODUCT-BACKLOG.md` records that as future work), and two
+keys in one JSON object do not yet justify one. Both go through `_read` and
+`_write`, so a third is one pair of functions, not a new mechanism.
 
 Every failure here is non-fatal. A corrupt file, an unreadable directory, a
 read-only home — none of them are reasons to refuse to start an editor, so each
@@ -18,6 +19,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
+
+#: Whether selecting text copies it, when nothing has been saved.
+#:
+#: **On, and Tau's is off** (`tau_coding/tui/config.py:92`). Tau treats auto-copy
+#: as an opt-in. omega turns it on because it was asked for as the default, and
+#: because in a Textual app the terminal's own selection is gone: mouse
+#: reporting sends the drag to the app, so the terminal never gets it. With the
+#: setting off, the drag still highlights and ctrl+c copies it.
+AUTO_COPY_DEFAULT = True
 
 
 def config_path() -> Path:
@@ -25,30 +36,46 @@ def config_path() -> Path:
     return Path.home() / ".omega" / "tui.json"
 
 
-def load_theme_name(default: str) -> str:
-    """The remembered theme, or `default` if there is not a usable one."""
+def _read() -> dict[str, Any]:
+    """The whole file as a dict, or `{}` for anything unusable."""
     try:
         data = json.loads(config_path().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-        return default
-    name = data.get("theme") if isinstance(data, dict) else None
-    return name if isinstance(name, str) and name else default
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
-def save_theme_name(name: str) -> None:
-    """Remember a theme. Silent on failure, by design — see the module docstring."""
+def _write(key: str, value: Any) -> None:
+    """Set one key. Silent on failure, by design — see the module docstring."""
     path = config_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         # Read-modify-write rather than overwrite, so that a future setting added
         # by a newer omega is not deleted by an older one.
-        try:
-            existing = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-            existing = {}
-        if not isinstance(existing, dict):
-            existing = {}
-        existing["theme"] = name
+        existing = _read()
+        existing[key] = value
         path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
     except OSError:
         return
+
+
+def load_theme_name(default: str) -> str:
+    """The remembered theme, or `default` if there is not a usable one."""
+    name = _read().get("theme")
+    return name if isinstance(name, str) and name else default
+
+
+def save_theme_name(name: str) -> None:
+    """Remember a theme."""
+    _write("theme", name)
+
+
+def load_auto_copy() -> bool:
+    """Whether selecting text copies it. Anything but a real bool is the default."""
+    value = _read().get("auto_copy")
+    return value if isinstance(value, bool) else AUTO_COPY_DEFAULT
+
+
+def save_auto_copy(enabled: bool) -> None:
+    """Remember the auto-copy setting."""
+    _write("auto_copy", enabled)
