@@ -175,9 +175,9 @@ export const sessionCommands = [
 
 /** TIER-2.md, the comparison table at lines 14-19. */
 export const measured = [
-  { label: "Source lines", tier1: "1,577", tier2: "4,654", today: "15,105" },
-  { label: "Test lines", tier1: "499", tier2: "4,257", today: "14,251" },
-  { label: "Tests", tier1: "45", tier2: "289", today: "758" },
+  { label: "Source lines", tier1: "1,577", tier2: "4,654", today: "15,179" },
+  { label: "Test lines", tier1: "499", tier2: "4,257", today: "14,556" },
+  { label: "Tests", tier1: "45", tier2: "289", today: "770" },
   { label: "loop.py", tier1: "151", tier2: "190", today: "190" },
 ] as const;
 

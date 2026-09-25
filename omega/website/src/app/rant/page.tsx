@@ -27,7 +27,7 @@ const FAILURES = [
 ] as const;
 
 const COMPARISON = [
-  { aspect: "Lines", spike: "70", layered: "15,105" },
+  { aspect: "Lines", spike: "70", layered: "15,179" },
   { aspect: "Files", spike: "1", layered: "58" },
   { aspect: "The loop", spike: "the whole file", layered: "190 lines" },
   { aspect: "Add a provider", spike: "edit six places", layered: "add one file" },
