@@ -216,7 +216,7 @@ export const timeline = [
  * do not have one yet.
  */
 export const upcoming = [
-  { name: "Claim omega-coding on PyPI", seam: "the workflow and the installer are already written" },
+  { name: "Claim omega-coding-agent on PyPI", seam: "the workflow and the installer are already written" },
   { name: "Self-update and version checking", seam: "--version exists; nothing compares it to a remote" },
   { name: "Settings file", seam: "the theme already persists to ~/.omega/tui.json" },
   { name: "Extensions and skills", seam: "none yet — nothing loads at runtime" },

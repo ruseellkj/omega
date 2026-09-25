@@ -20,14 +20,14 @@ set -eu
 
 UV_INSTALLER_URL="https://astral.sh/uv/install.sh"
 
-# **Where omega comes from.**  The PyPI name is `omega-coding` (`omega` is taken
+# **Where omega comes from.**  The PyPI name is `omega-coding-agent` (`omega` is taken
 # by an unrelated v0.4.0 games library) and the command is still `omega`.
 #
 # Until that name is published, installing from git is the path that actually
 # works — and an installer nobody can run is not testable.  One line changes
 # after the first release:
 #
-#     OMEGA_SOURCE="omega-coding"
+#     OMEGA_SOURCE="omega-coding-agent"
 #
 # Override for a fork or a branch:  OMEGA_SOURCE=... sh install.sh
 OMEGA_SOURCE="${OMEGA_SOURCE:-git+https://github.com/ruseellkj/omega#subdirectory=omega}"
