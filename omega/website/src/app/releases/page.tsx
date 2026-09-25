@@ -43,11 +43,12 @@ export default function ReleasesPage() {
       <Reveal>
         <div className="mt-10 border-t-2 border-rule-strong pt-7 md:mt-14">
           <p className="m-0 max-w-[62ch] text-ink-muted">
-            <span className="text-ink">omega is not on PyPI yet.</span> There is no{" "}
-            <code className="font-mono text-sm">pip install</code> and nothing on any index. The{" "}
-            <code className="font-mono text-sm">curl … | sh</code> installer on the home page installs
-            straight from this repository instead, and the PyPI release workflow is written and waits
-            on the name being claimed — the mechanics are in{" "}
+            <span className="text-ink">Only v0.1.0 is on PyPI.</span> It publishes as{" "}
+            <code className="font-mono text-sm">omega-coding-agent</code>, and the command it
+            installs is <code className="font-mono text-sm">omega</code>. The tier tags below it are
+            points in this repository&rsquo;s history, not downloads — read them with the clone
+            command underneath. The release workflow uploads over OIDC with no token stored
+            anywhere; the mechanics are in{" "}
             <a
               href={`${site.repo}/blob/main/omega/PRODUCT-BACKLOG.md`}
               className="cursor-pointer underline decoration-rule-strong underline-offset-4 transition-colors duration-200 hover:text-oxblood"

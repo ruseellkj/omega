@@ -291,8 +291,9 @@ export default function DocsPage() {
             <div className="md:col-span-3">
               <h2 className="label m-0 text-oxblood">Install</h2>
               <p className="m-0 mt-2.5 text-sm text-ink-muted md:max-w-[28ch]">
-                Three routes, each run end to end before it went on this page. Nothing is on PyPI
-                yet, so there is no <code className="font-mono">pip install</code>.
+                Three routes, each run end to end before it went on this page. There is no{" "}
+                <code className="font-mono">pip install</code>: omega needs Python 3.14, and uv
+                fetches an interpreter where pip expects you to have one.
               </p>
             </div>
             {/* `min-w-0` because a grid item will not shrink below its content by

@@ -47,9 +47,10 @@ export const install = "curl -fsSL https://omega-coding-agent.vercel.app/install
  * tool directory before it went on the page — `omega --version` answered
  * `omega 0.1.0` from all three.
  *
- * There is no `pip install` tab, because nothing is on PyPI yet. `uv` is the
- * install the script itself runs; `source` is one line, joined with `&&`, so
- * the copy button hands over something pasteable rather than four prompts.
+ * There is no `pip install` tab even now that v0.1.0 is on PyPI: omega needs
+ * Python 3.14, and `uv` fetches an interpreter itself where `pip` requires you
+ * to already have one. `source` is one line, joined with `&&`, so the copy
+ * button hands over something pasteable rather than four prompts.
  */
 export const installMethods = [
   {
@@ -61,8 +62,8 @@ export const installMethods = [
   {
     id: "uv",
     label: "uv",
-    cmd: 'uv tool install "git+https://github.com/ruseellkj/omega#subdirectory=omega"',
-    note: "Already have uv? This is the install the script runs.",
+    cmd: "uv tool install omega-coding-agent",
+    note: "Already have uv? This is the install the script runs. The distribution is omega-coding-agent; the command is omega.",
   },
   {
     id: "source",
@@ -205,7 +206,7 @@ export const timeline = [
     tier: "Beyond the tiers",
     status: "shipped" as const,
     headline: "Installable, and signed in to.",
-    body: "A curl installer, CI and a release workflow. /login signs in with a Claude or ChatGPT subscription in the browser, or stores an API key in a 0600 file. The model list refreshes from models.dev. Nothing is on PyPI yet — the release workflow waits on the name being claimed.",
+    body: "A curl installer, CI and a release workflow. /login signs in with a Claude or ChatGPT subscription in the browser, or stores an API key in a 0600 file. The model list refreshes from models.dev. v0.1.0 is on PyPI as omega-coding-agent, published by the release workflow over OIDC with no token in the repository.",
   },
 ] as const;
 
@@ -216,8 +217,7 @@ export const timeline = [
  * do not have one yet.
  */
 export const upcoming = [
-  { name: "Claim omega-coding-agent on PyPI", seam: "the workflow and the installer are already written" },
-  { name: "Self-update and version checking", seam: "--version exists; nothing compares it to a remote" },
+  { name: "Self-update and version checking", seam: "--version exists, and there is now a PyPI release to compare it against" },
   { name: "Settings file", seam: "the theme already persists to ~/.omega/tui.json" },
   { name: "Extensions and skills", seam: "none yet — nothing loads at runtime" },
   { name: "Sandboxing", seam: "the prepare seam shipped in Tier 2" },
@@ -229,9 +229,10 @@ export const upcoming = [
  * (`git ls-tree -r <tag>`), not from the tier documents, so a row cannot drift
  * from the code it points at.
  *
- * These are git tags and GitHub Releases. They are **not** downloads — omega is
- * not on any package index yet, and the page says so rather than implying a
- * `pip install` that does not exist.
+ * These are git tags and GitHub Releases, which is not the same list as the
+ * versions on PyPI: only v0.1.0 was published to an index. The tier tags below
+ * it are points in the source's history, and the page says so rather than
+ * implying every row is a download.
  */
 export const releases = [
   {

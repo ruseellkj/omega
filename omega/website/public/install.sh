@@ -20,17 +20,19 @@ set -eu
 
 UV_INSTALLER_URL="https://astral.sh/uv/install.sh"
 
-# **Where omega comes from.**  The PyPI name is `omega-coding-agent` (`omega` is taken
-# by an unrelated v0.4.0 games library) and the command is still `omega`.
+# **Where omega comes from.**  The PyPI name is `omega-coding-agent` (`omega` is
+# taken by an unrelated v0.4.0 games library) and the command is still `omega`.
 #
-# Until that name is published, installing from git is the path that actually
-# works — and an installer nobody can run is not testable.  One line changes
-# after the first release:
+# This was `git+https://github.com/ruseellkj/omega` until v0.1.0 was published on
+# 2026-09-25 — the one line that was always going to change after the first
+# release.  Installing from the index downloads a wheel instead of cloning and
+# building on the machine, so it is faster and needs no build toolchain, and
+# `uv tool upgrade` starts resolving properly rather than re-cloning.
 #
-#     OMEGA_SOURCE="omega-coding-agent"
+# To install an unreleased main, or a fork, or a branch:
 #
-# Override for a fork or a branch:  OMEGA_SOURCE=... sh install.sh
-OMEGA_SOURCE="${OMEGA_SOURCE:-git+https://github.com/ruseellkj/omega#subdirectory=omega}"
+#     OMEGA_SOURCE="git+https://github.com/ruseellkj/omega#subdirectory=omega" sh install.sh
+OMEGA_SOURCE="${OMEGA_SOURCE:-omega-coding-agent}"
 
 find_uv() {
     if command -v uv >/dev/null 2>&1; then
