@@ -384,7 +384,7 @@ omega already matches.
 - [x] CI on every push
 - [x] A release-triggered PyPI publish workflow
 - [x] An install script
-- [ ] Claim `omega-coding-agent` on PyPI and publish the first release
+- [x] Claim `omega-coding-agent` on PyPI and publish the first release
 - [ ] Add a license
 - [ ] A public website domain for the installer
 

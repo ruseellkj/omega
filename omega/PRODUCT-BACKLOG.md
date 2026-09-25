@@ -59,9 +59,10 @@ Two things learned in the doing, neither of them in the plan:
   `tui/__init__.py`, which imports Textual — ~160ms that `omega --version` and every `-p` run in a
   script would pay for a string.
 
-What is still outstanding here: **claiming `omega-coding-agent` on PyPI**, and the one-time Trusted
-Publishing setup on PyPI's side (repository `ruseellkj/omega`, workflow `publish.yml`,
-environment `pypi`). Until then `install.sh` installs from git, which works and is tested.
+**Done on 2026-09-25.** `omega-coding-agent` 0.1.0 is on PyPI, and the Trusted Publisher is
+registered on PyPI's side (repository `ruseellkj/omega`, workflow `publish.yml`, environment
+"(Any)" — the workflow still names `pypi`, which "(Any)" accepts). `install.sh` now installs from
+the index; `OMEGA_SOURCE=git+…` still installs from git, and both were run end to end.
 
 Self-update and version *checking* — Tau's `updater.py` (387) and `update_check.py` (379) — remain
 genuinely not done.
@@ -92,9 +93,10 @@ So `uv build` produces a working wheel today. What is missing is a **name**, a *
 ### The name
 
 `omega` is taken on PyPI (v0.4.0, *"Symbolic algorithms for solving games of infinite duration"*).
-`omega-ai` is taken (v0.1.0, an ML package). **`omega-coding-agent` is unclaimed** — checked, returns 404
-— and it matches the top-level package name, exactly as Tau publishes `tau-ai` while its package is
-`tau_coding`.
+`omega-ai` is taken (v0.1.0, an ML package). **`omega-coding-agent` was claimed on 2026-09-25**,
+after being checked and returning 404. The name was `omega-coding` until that day and changed to
+match the Trusted Publisher registered on PyPI — a publisher is bound to one exact project name.
+Tau does the same thing in reverse, publishing `tau-ai` while its package is `tau_coding`.
 
 **The command stays `omega` regardless.** The distribution name and the console script are
 different things, so nothing user-facing changes.

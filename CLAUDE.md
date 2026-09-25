@@ -178,4 +178,6 @@ Since then, product work — recorded in `omega/PRODUCT-BACKLOG.md`, not on the 
   update them, and the user's own `~/.omega/models.json` on top
 - CI on every push, and a PyPI publish on each published GitHub Release (`.github/workflows/`)
 
-Not done: `omega-coding-agent` is unclaimed on PyPI, so the publish workflow cannot succeed until it is.
+**v0.1.0 is published.** `omega-coding-agent` 0.1.0 is on PyPI, uploaded by `publish.yml` over
+OIDC with no token stored anywhere, and `install.sh` now installs from the index rather than from
+git. The command is still `omega`.
