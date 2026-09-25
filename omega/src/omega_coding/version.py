@@ -15,13 +15,17 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError, version
 
 #: Distribution names to try, newest first. **`omega` is taken on PyPI** (v0.4.0,
-#: a games library), so the package publishes as `omega-coding` while the command
-#: stays `omega` — a distribution name and a console script are different things.
+#: a games library), so the package publishes as `omega-coding-agent` while the
+#: command stays `omega` — a distribution name and a console script are
+#: different things.
 #:
-#: The old name is still tried because an `omega` installed before the rename is
-#: a real thing sitting on someone's machine, and reporting a dash for it would
-#: be a worse answer than the truth.
-DISTRIBUTIONS = ("omega-coding", "omega")
+#: **All three are tried, because each one is installed somewhere.** The
+#: distribution was `omega-coding` until 2026-09-25, and `install.sh` has been
+#: installing it straight from git the whole time, so a machine that ran the
+#: one-liner before then carries that name and nothing updates it in place.
+#: `omega` is older still. Reporting a dash for either would be a worse answer
+#: than the truth.
+DISTRIBUTIONS = ("omega-coding-agent", "omega-coding", "omega")
 
 #: Shown when omega is running from a source tree that was never installed. Not
 #: an error: `uv run omega` is the documented development path.

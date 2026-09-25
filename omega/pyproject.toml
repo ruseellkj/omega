@@ -1,9 +1,9 @@
 [project]
-# The distribution is `omega-coding` because `omega` is taken on PyPI (v0.4.0, a
+# The distribution is `omega-coding-agent` because `omega` is taken on PyPI (v0.4.0, a
 # games library). The console script below is still `omega`, so nothing
 # user-facing changes — a distribution name and a command are different things,
 # exactly as Tau publishes `tau-ai` and installs `tau`.
-name = "omega-coding"
+name = "omega-coding-agent"
 version = "0.1.0"
 description = "A terminal coding agent, built from scratch in layers."
 readme = "README.md"

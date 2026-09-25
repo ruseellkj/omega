@@ -16,7 +16,7 @@ read, so distribution is what forced the credential store.
 
 | | Kind of thing | omega's | Tau's | Pi's |
 |---|---|---|---|---|
-| **distribution** | a name in an index | `omega-coding` | `tau-ai` | `pi-coding-agent` |
+| **distribution** | a name in an index | `omega-coding-agent` | `tau-ai` | `pi-coding-agent` |
 | **command** | a file on your `PATH` | `omega` | `tau` | `pi` |
 | **repository** | where the source lives | `ruseellkj/omega` | huggingface/tau | earendil-works/pi |
 
@@ -118,6 +118,13 @@ npm  pi-coding-agent          0.73.1  ← Pi is published, on npm not PyPI
 **No, omega-coding is not on PyPI.** Both references are published on their
 language's index.
 
+> **Renamed on 2026-09-25.** The distribution is now `omega-coding-agent`, to
+> match the Trusted Publisher registered on PyPI. Every measured block on this
+> page — the 404 above, the `importlib.metadata` call and the shim's shebang
+> below — was recorded under the old name and is left exactly as it was run.
+> `omega-coding` is still in `version.py`'s `DISTRIBUTIONS`, because
+> `install.sh` had been installing it from git under that name.
+
 ### Does omega work like a package already?
 
 Yes — everything except the index entry. Verified end to end:
@@ -147,7 +154,7 @@ OMEGA_SOURCE="${OMEGA_SOURCE:-git+https://github.com/ruseellkj/omega#subdirector
 | works now | **yes** | no |
 | needs a build toolchain | yes, builds on the machine | no, downloads a wheel |
 | speed | slower — clone, then build | faster |
-| pinning | a tag or commit | `omega-coding==0.2.0` |
+| pinning | a tag or commit | `omega-coding-agent==0.2.0` |
 | corporate proxies, mirrors | usually blocked | usually allowed |
 | `uv tool upgrade` | re-clones | resolves properly |
 
@@ -224,8 +231,13 @@ workflow can print it.
 
 **Trusted Publishing** inverts it. PyPI is told once, through its web UI:
 
-> the repository `ruseellkj/omega`, workflow `publish.yml`, environment
-> `pypi`, may publish `omega-coding`
+> the repository `ruseellkj/omega`, workflow `publish.yml`, any environment,
+> may publish `omega-coding-agent`
+
+The environment was left as "(Any)" when this was registered on 2026-09-25.
+`publish.yml` still names `environment: pypi`, and that is fine — "(Any)"
+accepts whatever the job declares. Narrowing it later is a change on PyPI, not
+in the workflow.
 
 At publish time GitHub mints a short-lived signed statement — *"this job really is
 that workflow in that repository"* — and uv exchanges it for a token that lives
@@ -291,7 +303,7 @@ interpreter path, which is why it works from any directory.
 ```
 
 **Step 5 is the one people expect to exist and it does not.** The installer asks
-for `omega-coding` with no version, so a new release is picked up by the next
+for `omega-coding-agent` with no version, so a new release is picked up by the next
 person who runs it. Nothing is redeployed or regenerated.
 
 Three things must agree, and only two are checked automatically:

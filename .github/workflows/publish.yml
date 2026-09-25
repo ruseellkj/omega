@@ -1,4 +1,4 @@
-# Publish omega-coding to PyPI.
+# Publish omega-coding-agent to PyPI.
 #
 # Mirrors Tau's `research/tau/.github/workflows/publish.yml`, and the design
 # decision worth copying is the trigger: **a published GitHub Release, not a
@@ -12,7 +12,7 @@
 # omega lives in a subdirectory, so every step runs from `omega/`. GitHub only
 # reads `.github/workflows` at the repository root, which is why this file is
 # not next to the package it builds.
-name: Publish omega-coding
+name: Publish omega-coding-agent
 
 on:
   release:

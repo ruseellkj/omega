@@ -44,7 +44,7 @@ reasoning, and because a plan that quietly loses its finished items stops being 
 
 | | Then | Now |
 |---|---|---|
-| name | unclaimed | `omega-coding` in `pyproject.toml`; the command is still `omega` |
+| name | unclaimed | `omega-coding-agent` in `pyproject.toml`; the command is still `omega` |
 | version | no `--version` at all | `--version`, from `omega_coding/version.py` |
 | installer | none | `website/public/install.sh`, 109 lines, run end to end |
 | CI | **no `.github/` directory at all** | `ci.yml` and `publish.yml` |
@@ -59,7 +59,7 @@ Two things learned in the doing, neither of them in the plan:
   `tui/__init__.py`, which imports Textual — ~160ms that `omega --version` and every `-p` run in a
   script would pay for a string.
 
-What is still outstanding here: **claiming `omega-coding` on PyPI**, and the one-time Trusted
+What is still outstanding here: **claiming `omega-coding-agent` on PyPI**, and the one-time Trusted
 Publishing setup on PyPI's side (repository `ruseellkj/omega`, workflow `publish.yml`,
 environment `pypi`). Until then `install.sh` installs from git, which works and is tested.
 
@@ -92,7 +92,7 @@ So `uv build` produces a working wheel today. What is missing is a **name**, a *
 ### The name
 
 `omega` is taken on PyPI (v0.4.0, *"Symbolic algorithms for solving games of infinite duration"*).
-`omega-ai` is taken (v0.1.0, an ML package). **`omega-coding` is unclaimed** — checked, returns 404
+`omega-ai` is taken (v0.1.0, an ML package). **`omega-coding-agent` is unclaimed** — checked, returns 404
 — and it matches the top-level package name, exactly as Tau publishes `tau-ai` while its package is
 `tau_coding`.
 
@@ -133,7 +133,7 @@ published examples, as given:
 | Claude Code | `curl -fsSL https://claude.ai/install.sh \| bash` |
 
 For a Python tool the script does roughly: detect OS and architecture → ensure a runtime is present
-(install `uv` if missing) → `uv tool install omega-coding` → put the `omega` shim on `PATH` → print
+(install `uv` if missing) → `uv tool install omega-coding-agent` → put the `omega` shim on `PATH` → print
 what it did. It needs somewhere to be hosted at a stable URL, which means **a domain is a
 prerequisite**, not a detail. That is a real decision and it has not been made.
 

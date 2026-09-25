@@ -14,15 +14,20 @@ import sys
 from omega_coding import version as version_module
 
 
-def test_the_distribution_is_omega_coding_and_the_old_name_still_resolves() -> None:
+def test_the_distribution_is_the_new_name_and_both_old_ones_still_resolve() -> None:
     """**`omega` is taken on PyPI** (v0.4.0, an unrelated games library), so the
-    package publishes as `omega-coding` while the command stays `omega`.
+    package publishes as `omega-coding-agent` while the command stays `omega`.
 
-    The old name is still tried, because an `omega` installed before the rename
-    is a real thing on someone's machine and reporting "(from source)" for it
+    Both older names are still tried, because each is installed somewhere. The
+    distribution was `omega-coding` until 2026-09-25 and `install.sh` installed
+    it straight from git, so anyone who ran the one-liner before then has that
+    name on disk; `omega` is older still. Reporting "(from source)" for either
     would be a worse answer than the truth.
+
+    Newest first, so a machine carrying two of them answers with the one
+    installed most recently.
     """
-    assert version_module.DISTRIBUTIONS == ("omega-coding", "omega")
+    assert version_module.DISTRIBUTIONS == ("omega-coding-agent", "omega-coding", "omega")
     assert version_module.omega_version() != version_module.UNKNOWN
 
 

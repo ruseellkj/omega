@@ -178,4 +178,4 @@ Since then, product work — recorded in `omega/PRODUCT-BACKLOG.md`, not on the 
   update them, and the user's own `~/.omega/models.json` on top
 - CI on every push, and a PyPI publish on each published GitHub Release (`.github/workflows/`)
 
-Not done: `omega-coding` is unclaimed on PyPI, so the publish workflow cannot succeed until it is.
+Not done: `omega-coding-agent` is unclaimed on PyPI, so the publish workflow cannot succeed until it is.

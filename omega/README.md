@@ -34,7 +34,7 @@ verifies the command it just created, and tells you if the bin directory is not 
 **never edits a shell rc file** — uv owns `PATH`, and a tool that appends to `~/.zshrc` is one you
 cannot cleanly uninstall.
 
-The distribution is **`omega-coding`** (`omega` is taken on PyPI by an unrelated games library); the
+The distribution is **`omega-coding-agent`** (`omega` is taken on PyPI by an unrelated games library); the
 command stays `omega`. Until that name is published the installer pulls from git, which is one line
 to change and means it can be tested today rather than after a release.
 
