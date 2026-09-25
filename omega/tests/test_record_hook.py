@@ -94,6 +94,30 @@ async def test_the_masked_version_is_what_reaches_disk(tmp_path: Path) -> None:
     assert KEY not in raw, "not in the bytes either, not just the parsed objects"
 
 
+async def test_a_loaded_session_can_be_masked_without_a_turn_or_a_write(tmp_path: Path) -> None:
+    """A session saved before `before_record` existed holds keys in the clear.
+    `resume` loads it as it is and leaves the masking to the next turn. That was
+    fine while nothing showed a loaded session, but the terminal UI now draws it
+    the moment it loads. So the harness has to mask without a turn, and without
+    writing, because opening a session must not append to it."""
+    store = JsonlSessionStore(tmp_path, home=tmp_path)
+    old = _harness(FakeProvider([text_turn("ok")]), store=store, hooks=AgentHooks())
+    async for _ in old.run(f"my key is {KEY}"):
+        pass
+    assert old.session_id is not None
+    file = store.directory / f"{old.session_id}.jsonl"
+    before = file.read_text()
+    assert KEY in before, "the fixture is an unmasked session"
+
+    harness = _harness(FakeProvider([]), store=JsonlSessionStore(tmp_path, home=tmp_path))
+    harness.resume(old.session_id)
+    await harness.clean_pending()
+
+    assert KEY not in _text(harness.messages)
+    assert "[redacted Anthropic API key]" in _text(harness.messages)
+    assert file.read_text() == before, "masking wrote to the session file"
+
+
 # ------------------------------------------------------------- the seam itself
 
 

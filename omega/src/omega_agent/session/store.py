@@ -60,11 +60,11 @@ class SessionInfo:
 
 
 class SessionStore(Protocol):
-    """The storage seam. Seven methods, all the harness and CLI need.
+    """The storage seam. Eight methods, all the harness and CLI need.
 
-    Two arrived with Tier 3 branching — `entries` and `branch_from`. Both are on
-    the Protocol rather than the concrete class because the harness calls them,
-    and a seam a caller has to downcast through is not a seam.
+    Three arrived with branching — `entries`, `branch_from` and `path`. All are
+    on the Protocol rather than the concrete class because the harness calls
+    them, and a seam a caller has to downcast through is not a seam.
     """
 
     def create_session(self, *, model: str) -> str:
@@ -81,6 +81,10 @@ class SessionStore(Protocol):
 
     def branch_from(self, session_id: str, entry_id: str | None) -> None:
         """Hang the next appended entry off `entry_id` rather than the tail."""
+        ...
+
+    def path(self, session_id: str) -> list[SessionEntry]:
+        """The entries the next append continues, root first."""
         ...
 
     def load(self, session_id: str, *, branch: str | None = None) -> list[AgentMessage]:
@@ -276,6 +280,22 @@ class JsonlSessionStore:
         keeping the old one readable.
         """
         self._last_entry[session_id] = entry_id
+
+    def path(self, session_id: str) -> list[SessionEntry]:
+        """The conversation the next append continues: root to where it will hang.
+
+        **What a rewind has to cut, and not `entries()`.** `entries()` is every
+        branch in write order, so once one rewind has happened it holds more than
+        the conversation, and a position in the conversation stops being a
+        position in it. Cutting that list by index is how a second rewind put an
+        abandoned branch back on disk.
+
+        Differs from `load()` only between a `branch_from` and the next append.
+        `load()` still returns the newest leaf, and this returns where the next
+        entry will hang, which is the conversation a rewind just produced.
+        """
+        tip = self._parent_for(session_id)
+        return [] if tip is None else path_to(self.entries(session_id), tip)
 
     def _parent_for(self, session_id: str) -> str | None:
         if session_id in self._last_entry:

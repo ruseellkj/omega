@@ -301,7 +301,7 @@ class OmegaApp(App[None]):
             confine=self._confine,
         )
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         self.title = self._title
         for theme in themes.BUILTIN.values():
             self.register_theme(_as_textual(theme))
@@ -310,7 +310,7 @@ class OmegaApp(App[None]):
         if self.harness.messages:
             # `--resume` and `--continue` load the session in `cli.py`, before
             # this app exists, and print the count to a terminal it then covers.
-            self._reload_transcript()
+            await self._reload_transcript()
             self.refresh_view()
         if self._commands is not None:
             # The REPL's `getpass` asker cannot work here — Textual owns the
@@ -387,8 +387,14 @@ class OmegaApp(App[None]):
             pane.scroll_end(animate=False)
         self._refresh_status()
 
-    def _reload_transcript(self) -> None:
+    async def _reload_transcript(self) -> None:
         """Replace every row with the conversation the harness now holds.
+
+        **Masked first.** What `resume` and `rewind` load comes from the file, and
+        a file written before `before_record` existed holds keys in the clear.
+        Masking used to wait for the next turn, which is soon enough for the model
+        but was too late for this screen: it drew the key. `clean_pending` masks
+        without writing, so drawing a session never appends to it.
 
         **Widgets are thrown away, not reused.** `refresh_view` updates rows in
         place by index, which is right when the transcript only grows at the
@@ -401,6 +407,7 @@ class OmegaApp(App[None]):
         Deferred removal cannot cause a duplicate here, because rows carry no
         ids. The `#header` guard in `refresh_view` exists for that problem.
         """
+        await self.harness.clean_pending()
         for widget in self._rows:
             widget.remove()
         self._rows.clear()
@@ -538,7 +545,7 @@ class OmegaApp(App[None]):
             self.refresh_view()
             return
 
-        session, count = self.harness.session_id, len(self.harness.messages)
+        session, before = self.harness.session_id, list(self.harness.messages)
         lines: list[str] = []
         # `replace` rather than rebuilding the context by hand: it is a frozen
         # dataclass, so this is the supported way to swap one field, and it
@@ -547,14 +554,16 @@ class OmegaApp(App[None]):
         # These handlers change `harness.messages` and none can touch the
         # screen, so it kept showing turns that were no longer the conversation.
         # A failed `/resume` or an empty `/rewind` changes nothing, so the screen
-        # stays too. `/compact` is not here on purpose: it shrinks what the
-        # model sees, and says the full history is kept, so the screen keeps it.
-        if outcome == "handled" and (
-            name == "/clear"
-            or (name == "/resume" and self.harness.session_id != session)
-            or (name == "/rewind" and len(self.harness.messages) < count)
-        ):
-            self._reload_transcript()
+        # stays too. Both are compared by content, not by id or length: after a
+        # `/compact`, `/rewind` reloads the saved conversation, which is *longer*
+        # than the compacted one, and `/resume` of the session you are in brings
+        # back a rewind nothing followed. `/compact` is not here on purpose: it
+        # shrinks what the model sees and keeps the full history, so the screen
+        # keeps it too.
+        changed = self.harness.session_id != session or self.harness.messages != before
+        swapped = name == "/clear" or (name in ("/resume", "/rewind") and changed)
+        if outcome == "handled" and swapped:
+            await self._reload_transcript()
         body = "\n".join(line for line in lines if line.strip())
         if body:
             self.state.add("notice", body)

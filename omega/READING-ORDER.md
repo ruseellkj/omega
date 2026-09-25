@@ -35,10 +35,10 @@ stops being true.
 | 7 | `cancellation.py` | 52 | The stop button. Twenty lines, and it *latches* — read why that matters. |
 | 8 | **`loop.py`** | **190** | **The machine.** Ask, run what was asked for, repeat. Find the stop condition — it is one line, and it reads content, not metadata. |
 | 9 | `tool_runner.py` | 116 | One tool call becomes one tool result. Never raises. Split out of `loop.py` when the loop hit 249 of its 250-line limit. |
-| 10 | `harness.py` | 452 | **Who owns the conversation.** Also the orphan repair, which is the fix for the nastiest bug in the whole project. |
+| 10 | `harness.py` | 497 | **Who owns the conversation.** Also the orphan repair, which is the fix for the nastiest bug in the whole project. Read `rewind` for why it cuts the file's path and not this list. |
 | 11 | `session/entries.py` | 48 | What one line of a saved session looks like. Note `parent_id`, present even though nothing branches yet. |
 | 12 | `session/jsonl.py` | 99 | Append-only writing, and a reader that survives a half-written last line. |
-| 13 | `session/store.py` | 290 | Where sessions live, behind an interface so the backend can change later. |
+| 13 | `session/store.py` | 310 | Where sessions live, behind an interface so the backend can change later. `path` is the conversation the next append continues, and `entries` is every branch. |
 
 ---
 
@@ -78,7 +78,7 @@ neither imports it.
 | 26c | `subagent.py` | 185 | **Tier 3.** A nested agent, as a tool calling `run_headless`. |
 | 26d | `tui/state.py` | 299 | **Tier 3.** What the screen shows. Imports no Textual. `load_messages` redraws a stored session, and is tested against a live turn rather than a list. |
 | 26e | `tui/adapter.py` | 130 | **Tier 3.** The 10 agent events -> screen state. |
-| 26f | `tui/app.py` | 1,102 | **Tier 3.** The screen. Steering becomes typeable here. Read "Copying and pasting" for why `ctrl+c` copies before it stops. |
+| 26f | `tui/app.py` | 1,111 | **Tier 3.** The screen. Steering becomes typeable here. Read "Copying and pasting" for why `ctrl+c` copies before it stops. |
 | 26g | `session/tree.py` | 101 | **Tier 3.** The transcript is a tree. `path_to`, `leaves`, cycle detection. |
 | 26a | `compact.py` | 377 | **Tier 3.** Fills `transform_context`. Cuts on turn boundaries so a tool call is never orphaned. |
 | 27 | `cost.py` | 123 | What the run cost. Read why it ships **no price table**. |

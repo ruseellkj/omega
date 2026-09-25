@@ -222,7 +222,7 @@ project not to run low. → [`TIER-3.md`](omega/TIER-3.md)
 
 ### Beyond the tiers — a product
 
-**Today (2026-09-24) · 15,105 lines · 758 tests**
+**Today (2026-09-25) · 15,179 lines · 770 tests**
 
 With every beginner failure closed, the work moved from the tier scorecard to the
 [product backlog](omega/PRODUCT-BACKLOG.md):

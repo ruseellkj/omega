@@ -35,6 +35,7 @@ from omega_agent.hooks import AgentHooks
 from omega_agent.loop import DEFAULT_MAX_TURNS, run_agent_loop
 from omega_agent.provider import ModelProvider
 from omega_agent.session import SessionStore
+from omega_agent.session.tree import leaves
 from omega_agent.tools import Tool
 from omega_agent.types import AgentMessage, AssistantMessage, ToolResultMessage, UserMessage
 
@@ -247,6 +248,12 @@ class Harness:
 
         self.session_id = session_id
         self.messages[:] = self.store.load(session_id)
+        # The next append must hang where that load ended, and `load` ends at the
+        # newest leaf. This store may still point wherever a rewind left it with
+        # nothing asked after, which saved the next answer to another branch than
+        # the one on screen. Same rule as `load`, so the two cannot drift apart.
+        ends = leaves(self.store.entries(session_id))
+        self.store.branch_from(session_id, ends[-1].id if ends else None)
         self._persisted = len(self.messages)
 
         # Deliberately 0, not len(). What is on disk was redacted on the way in
@@ -299,23 +306,45 @@ class Harness:
         so the old branch remains loadable with `load(branch=...)`. That is the
         whole reason the file is append-only, and the reason `parent_id` was
         written on every entry a tier before anything read it.
+
+        **With a session file, the cut is made on the file, not on this list.**
+        This used to cut the list and use the same position in `store.entries()`
+        as the new parent, which holds only while the two are the same length and
+        order. Two ordinary things break that. `replace_transcript` shrinks the
+        list and writes nothing, and every rewind leaves an abandoned branch in a
+        file that `entries()` returns whole. Both were measured: after `/compact`
+        the next answer hung off an early question and the file lost four turns,
+        and a second rewind put the first one's abandoned branch back. Now the
+        store says which conversation the next append continues (`path`), the cut
+        is made there, and the list is reloaded from what is kept.
+
+        So after a compaction the list comes back whole. The compacted list was a
+        working copy, and a rewind is a statement about the conversation. Nor can
+        the compaction note be taken for a question, since it was never written.
+
+        **Without a file (`--no-save`) the list is all there is**, so it is cut
+        directly. There the note is the nearest point a rewind can reach, because
+        the turns it stands for exist nowhere else.
         """
+        if self.store is not None and self.session_id is not None:
+            path = self.store.path(self.session_id)
+            starts = [i for i, entry in enumerate(path) if isinstance(entry.message, UserMessage)]
+            if not starts:
+                return 0
+            cut = starts[-questions] if questions <= len(starts) else starts[0]
+            self.store.branch_from(self.session_id, path[cut - 1].id if cut else None)
+            self.messages[:] = [entry.message for entry in path[:cut]]
+            self._persisted = len(self.messages)
+            # 0, as in `resume`: these came back from the file, and a file written
+            # before `before_record` existed was never masked.
+            self._recorded = 0
+            return len(path) - cut
+
         starts = [i for i, m in enumerate(self.messages) if isinstance(m, UserMessage)]
         if not starts:
             return 0
-
         cut = starts[-questions] if questions <= len(starts) else starts[0]
         removed = len(self.messages) - cut
-
-        # The store assigns entry ids in message order, so the entry that should
-        # become the new parent is the one before the cut. Resolved through the
-        # store rather than guessed, because a resumed session has entries this
-        # harness never wrote.
-        if self.store is not None and self.session_id is not None:
-            written = self.store.entries(self.session_id)
-            parent = written[cut - 1].id if 0 < cut <= len(written) else None
-            self.store.branch_from(self.session_id, parent)
-
         del self.messages[cut:]
         self._persisted = len(self.messages)
         self._recorded = len(self.messages)
@@ -384,6 +413,23 @@ class Harness:
         caller's object is never edited underneath anything holding a reference,
         which is the same guarantee `transform_context` gives one layer up.
         """
+        await self.clean_pending()
+        self._flush()
+
+    async def clean_pending(self) -> None:
+        """Offer `before_record` every message it has not seen, and write nothing.
+
+        `_record` is this, then a write. **It is public for whatever shows the
+        transcript between turns.** `resume` and `rewind` load messages from the
+        file and leave masking to the next turn. That is enough for the model,
+        which sees nothing until then, but not for a screen that draws the
+        session the moment it loads. A file written before `before_record`
+        existed holds keys in the clear, and the terminal UI drew them.
+
+        Writes nothing on purpose. Opening a session to read it must not append
+        to it, and the file is append-only, so a masked copy could not replace
+        the original line anyway.
+        """
         if self.hooks.before_record is not None:
             while self._recorded < len(self.messages):
                 index = self._recorded
@@ -391,7 +437,6 @@ class Harness:
                 self._recorded += 1
         else:
             self._recorded = len(self.messages)
-        self._flush()
 
     def _flush(self) -> None:
         """Write whatever is not on disk yet.

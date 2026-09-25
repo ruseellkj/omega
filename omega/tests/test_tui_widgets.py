@@ -13,9 +13,11 @@ import asyncio
 import json
 import re
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import pytest
 from textual import events
 from textual.containers import VerticalScroll
 from textual.widgets.input import Selection
@@ -23,12 +25,15 @@ from textual.widgets.input import Selection
 from conftest import RecordingClipboard  # the suite's own conftest
 from omega_agent.agent_events import AgentStartEvent, ToolExecutionStartEvent
 from omega_agent.harness import Harness
+from omega_agent.hooks import AgentHooks
 from omega_agent.session import JsonlSessionStore
 from omega_agent.types import ToolCall
 from omega_ai.fake import FakeProvider, text_turn, tool_turn
 from omega_coding.builtin_tools import build_tools
 from omega_coding.commands import CommandContext
+from omega_coding.compact import Compactor
 from omega_coding.cost import CostTracker
+from omega_coding.redact import redact_message
 from omega_coding.status import FRAMES
 from omega_coding.tui import banner, themes
 from omega_coding.tui.app import OmegaApp
@@ -409,6 +414,107 @@ async def test_rewind_takes_the_dropped_question_off_the_screen(tmp_path: Path) 
 
         assert _user_rows_on_screen(app) == ["❯ first", "❯ second"]
         assert "Rewound" in app.state.rows[-1].text
+
+
+#: Shaped like an Anthropic key and matched by the same pattern. Not one.
+KEY = "sk-ant-" + "A" * 40
+
+
+@pytest.mark.parametrize("way_in", ["startup", "resume", "rewind"])
+async def test_a_loaded_session_is_masked_before_it_is_drawn(tmp_path: Path, way_in: str) -> None:
+    """**Measured on all three paths: the key was on screen.** A session saved
+    before masking existed holds it in the clear, and the screen drew what the
+    harness had loaded before any turn masked it. `/rewind` reloads from the
+    same file, so it drew the key too."""
+    store = JsonlSessionStore(tmp_path, home=tmp_path)
+    old = Harness(
+        provider=FakeProvider([text_turn("ok"), text_turn("ok")]),
+        model="m",
+        system="s",
+        tools=[],
+        store=store,
+    )
+    for prompt in (f"my key is {KEY}", "second"):
+        async for _ in old.run(prompt):
+            pass
+    assert old.session_id is not None
+
+    fresh = JsonlSessionStore(tmp_path, home=tmp_path)
+    harness = Harness(
+        provider=FakeProvider([]),
+        model="m",
+        system="s",
+        tools=[],
+        store=fresh,
+        hooks=AgentHooks(before_record=redact_message),
+    )
+    context = CommandContext(
+        harness=harness,
+        store=fresh,
+        tracker=CostTracker(),
+        model="m",
+        system="s",
+        tools=[],
+        hooks=harness.hooks,
+    )
+    if way_in == "startup":
+        harness.resume(old.session_id)  # what `cli.py` does for --resume
+    app = OmegaApp(harness, context=context)
+    async with app.run_test() as pilot:
+        if way_in != "startup":
+            await app._run_command(f"/resume {old.session_id}")
+        if way_in == "rewind":
+            await app._run_command("/rewind")
+        await pilot.pause()
+
+        shown = [str(row.render()) for row in app.query(TranscriptRow)]
+        assert any("my key is" in text for text in shown), "the row is drawn"
+        assert not any(KEY in text for text in shown)
+        assert not any(KEY in row.text + row.output for row in app.state.rows)
+
+
+async def test_resume_of_the_session_you_are_in_redraws_when_it_changes(tmp_path: Path) -> None:
+    """A rewind nothing followed is not saved, so `/resume` of the same session
+    brings the dropped question back, as a fresh `--resume` would. The session
+    id does not change, so a redraw keyed on the id alone left the screen short
+    of the conversation."""
+    app = _app_with_commands(tmp_path)
+    async with app.run_test() as pilot:
+        await _ask(pilot, app, "first")
+        await _ask(pilot, app, "second")
+        await app._run_command("/rewind")
+        await pilot.pause()
+        assert _user_rows_on_screen(app) == ["❯ first"]
+
+        await app._run_command(f"/resume {app.harness.session_id}")
+        await pilot.pause()
+
+        assert _user_rows_on_screen(app) == ["❯ first", "❯ second"]
+
+
+async def test_rewind_after_compact_shows_the_conversation_it_continues(tmp_path: Path) -> None:
+    """`/compact` leaves the screen alone and shrinks the harness. `/rewind` then
+    reloads the saved conversation, which is *longer* than the compacted one, so
+    a redraw keyed on "the harness got shorter" never fired and the rewound
+    question stayed on screen."""
+    turns = [text_turn("answer " + "x" * 400) for _ in range(8)]
+    app = _app_with_commands(tmp_path, FakeProvider(turns))
+    assert app._commands is not None
+    app._commands = replace(
+        app._commands, compactor=Compactor(model="m", system="s", tools=[], window=2000)
+    )
+    async with app.run_test() as pilot:
+        for number in range(6):
+            await _ask(pilot, app, f"q{number} " + "y" * 400)
+        await app._run_command("/compact 10")
+        await pilot.pause()
+        assert len(_user_rows_on_screen(app)) == 6, "compaction leaves the screen alone"
+
+        await app._run_command("/rewind")
+        await pilot.pause()
+
+        shown = [text.removeprefix("❯ ")[:2] for text in _user_rows_on_screen(app)]
+        assert shown == ["q0", "q1", "q2", "q3", "q4"]
 
 
 async def test_commands_that_rewrite_the_conversation_wait_for_the_turn(tmp_path: Path) -> None:

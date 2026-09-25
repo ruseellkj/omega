@@ -28,6 +28,7 @@ return what it always did.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -237,6 +238,180 @@ async def test_the_abandoned_branch_is_still_on_disk(tmp_path: Path) -> None:
     assert len(store.entries(session)) > before, "entries were added, never removed"
     raw = (store.directory / f"{session}.jsonl").read_text()
     assert "first" in raw, "the abandoned question is still in the file"
+
+
+# ------------------------------------ the file stays on the conversation you had
+
+
+def _saving_harness(tmp_path: Path, answers: int) -> tuple[Any, Any]:
+    from omega_agent.harness import Harness
+    from omega_agent.session import JsonlSessionStore
+    from omega_ai.fake import FakeProvider, text_turn
+
+    store = JsonlSessionStore(tmp_path, home=tmp_path)
+    harness = Harness(
+        provider=FakeProvider([text_turn(f"a{n}") for n in range(1, answers + 1)]),
+        model="m",
+        system="s",
+        tools=[],
+        store=store,
+    )
+    return harness, store
+
+
+async def _ask(harness: Any, *questions: str) -> None:
+    for question in questions:
+        async for _ in harness.run(question):
+            pass
+
+
+def _said(messages: list[Any]) -> list[str]:
+    return [m.content if isinstance(m, UserMessage) else m.text for m in messages]
+
+
+def test_path_is_the_conversation_the_next_append_continues(tmp_path: Path) -> None:
+    """What `rewind` cuts. Not `entries()`, which is every branch in write order."""
+    from omega_agent.session import JsonlSessionStore
+
+    store = JsonlSessionStore(tmp_path, home=tmp_path)
+    session = store.create_session(model="m")
+    for text in ("a", "b", "c"):
+        store.append(session, UserMessage(content=text))
+    assert [e.message.content for e in store.path(session)] == ["a", "b", "c"]
+
+    store.branch_from(session, store.entries(session)[0].id)
+    assert [e.message.content for e in store.path(session)] == ["a"]
+
+    store.branch_from(session, None)
+    assert store.path(session) == []
+
+    # Another process has never seen this session, and continues from its tail.
+    fresh = JsonlSessionStore(tmp_path, home=tmp_path)
+    assert [e.message.content for e in fresh.path(session)] == ["a", "b", "c"]
+
+
+async def test_a_second_rewind_keeps_the_file_on_the_conversation_you_had(
+    tmp_path: Path,
+) -> None:
+    """**Found by running it.** `rewind` chose the new parent by position in
+    `store.entries()`, which is the whole file in write order, abandoned branches
+    included. After one rewind the file holds more than the conversation, so the
+    second rewind picked an entry off the abandoned branch. Memory said
+    q1 q3 q5, and the file, which is what `--resume` loads, said q1 q2 q5."""
+    harness, store = _saving_harness(tmp_path, 5)
+    await _ask(harness, "q1", "q2")
+    harness.rewind()
+    await _ask(harness, "q3", "q4")
+    harness.rewind()
+    await _ask(harness, "q5")
+
+    expected = ["q1", "a1", "q3", "a3", "q5", "a5"]
+    assert _said(harness.messages) == expected
+    assert _said(store.load(harness.session_id)) == expected, "the file went its own way"
+
+
+async def test_rewinding_after_compaction_keeps_the_file_on_the_conversation_you_had(
+    tmp_path: Path,
+) -> None:
+    """**The same bug, through compaction.** `replace_transcript` shrinks the
+    working transcript and writes nothing, so positions in memory stop matching
+    positions in the file. Measured before the fix: the answer after a rewind
+    was hung off q2, and the file lost q3 to q6."""
+    harness, store = _saving_harness(tmp_path, 8)
+    await _ask(harness, "q1", "q2", "q3", "q4", "q5", "q6")
+    # The shape `Compactor.compact_to` returns: the first turn, one note standing
+    # in for the middle, then the newest turn.
+    note = UserMessage(content="[compacted] 4 earlier turns were removed")
+    harness.replace_transcript([*harness.messages[:2], note, *harness.messages[-2:]])
+    await _ask(harness, "q7")
+
+    harness.rewind()
+    await _ask(harness, "q8")
+
+    expected = [f"{kind}{n}" for n in (1, 2, 3, 4, 5, 6, 8) for kind in ("q", "a")]
+    assert _said(store.load(harness.session_id)) == expected, "the file went its own way"
+    assert _said(harness.messages) == expected, "and memory continues what is saved"
+
+
+async def test_after_compaction_rewind_takes_back_your_question_not_the_note(
+    tmp_path: Path,
+) -> None:
+    """Compaction keeps whole *turns*, so the newest thing kept can be an answer
+    whose question was folded into the note. Rewind then counted the note as
+    the last question and went back five questions, not one."""
+    harness, store = _saving_harness(tmp_path, 6)
+    await _ask(harness, "q1", "q2", "q3", "q4", "q5", "q6")
+    note = UserMessage(content="[compacted] 5 earlier turns were removed")
+    harness.replace_transcript([*harness.messages[:2], note, harness.messages[-1]])
+
+    assert harness.rewind() == 2, "one question and its answer"
+
+    expected = [f"{kind}{n}" for n in range(1, 6) for kind in ("q", "a")]
+    assert _said(harness.messages) == expected
+
+
+async def test_resuming_after_an_unanswered_rewind_saves_what_it_loaded(tmp_path: Path) -> None:
+    """**Found in review, then measured.** A rewind with nothing asked after it
+    moves only the store's in-memory pointer. `resume` loads the newest leaf,
+    so in the same process memory said q1 a1 q2 a2 q3 while the file hung q3
+    off a1. The terminal UI keeps one store for its whole life, so `/rewind`
+    then `/resume` reached this. A fresh `--resume` of the same file loads the
+    newest leaf, and resuming in-process now means the same."""
+    harness, store = _saving_harness(tmp_path, 3)
+    await _ask(harness, "q1", "q2")
+    session = harness.session_id
+    harness.rewind()
+
+    harness.resume(session)
+    await _ask(harness, "q3")
+
+    expected = ["q1", "a1", "q2", "a2", "q3", "a3"]
+    assert _said(harness.messages) == expected
+    assert _said(store.load(session)) == expected, "the file went its own way"
+
+
+async def test_what_rewind_reloads_is_masked_before_it_is_sent(tmp_path: Path) -> None:
+    """Rewind now reloads the conversation from the file, and a file written
+    before `before_record` existed was never masked. So the reload has to go
+    back through the hook, as `resume`'s does, or a secret the working copy had
+    already masked is sent to the model again."""
+    from omega_agent.harness import Harness
+    from omega_agent.hooks import AgentHooks
+    from omega_agent.session import JsonlSessionStore
+    from omega_ai.fake import FakeProvider, text_turn
+
+    async def mask(message: Any) -> Any:
+        if isinstance(message, UserMessage):
+            return message.model_copy(
+                update={"content": message.content.replace("sk-SECRET", "[REDACTED]")}
+            )
+        return message
+
+    written, _ = _saving_harness(tmp_path, 2)
+    await _ask(written, "my key is sk-SECRET", "q2")  # saved with no hook at all
+
+    sent: list[str] = []
+
+    class Recording:
+        async def stream_response(self, **kwargs: Any) -> Any:
+            sent.extend(_said(kwargs["messages"]))
+            async for event in FakeProvider([text_turn("a3")]).stream_response(**kwargs):
+                yield event
+
+    harness = Harness(
+        provider=Recording(),  # type: ignore[arg-type]
+        model="m",
+        system="s",
+        tools=[],
+        store=JsonlSessionStore(tmp_path, home=tmp_path),
+        hooks=AgentHooks(before_record=mask),
+    )
+    harness.resume(written.session_id)
+    harness.rewind()
+    await _ask(harness, "q3")
+
+    assert sent[0] == "my key is [REDACTED]"
+    assert not any("sk-SECRET" in text for text in sent)
 
 
 async def test_rewinding_without_a_store_still_works(tmp_path: Path) -> None:

@@ -6,8 +6,8 @@ Named after a physics letter, following [Pi](https://github.com/earendil-works/p
 [Tau](https://github.com/huggingface/tau) — the two MIT-licensed agents this is studied from.
 Written independently, not forked.
 
-**Currently at Tier 3 — "it survives a long task, and has a face."** 15,105 lines of source,
-758 tests, all offline.
+**Currently at Tier 3 — "it survives a long task, and has a face."** 15,179 lines of source,
+770 tests, all offline.
 
 * **[`READING-ORDER.md`](READING-ORDER.md) — start here.** All 53 files in the order to read them,
   one line each, plus the questions to hold while reading.
@@ -328,7 +328,7 @@ the argument for diverging is in `src/omega_coding/commands.py`.
 ## Check it
 
 ```bash
-uv run pytest -q                    # 758 tests, ~45s, fully offline
+uv run pytest -q                    # 770 tests, ~55s, fully offline
 uv run mypy --strict src
 uv run ruff check .
 uv run python -m omega_coding.evals # smoke eval: does the assembled agent still work?
