@@ -445,7 +445,7 @@ async def access_token(provider: str) -> str:
     is a constant, so the adapter could read it once; a subscription token lasts
     hours, and a turn that begins valid can end unauthorised. `AnthropicProvider`
     re-resolves on every request and every retry for exactly this reason
-    (`omega_ai/anthropic.py:498-508`) — this is the function that seam was cut
+    (`omega_ai/anthropic.py:583-587`) — this is the function that seam was cut
     for, and until now nothing filled it.
 
     A stored credential wins, as everywhere else — and it wins here even when the

@@ -283,6 +283,12 @@ lands without surgery.
   `providers/streaming.py` is the obvious next refactor. Worth noting where the duplication sits:
   inside `providers/`, which is exactly where the boundary said vendor concerns belong. The
   abstraction leaked nothing upward; it repeated itself sideways.
+- *Found and fixed 2026-09-28:* **the retry wrapper was not the only retry layer.** Both SDKs
+  retry twice by default, and the clients were built without `max_retries`, so one 429 cost nine
+  requests, and a 429 that waiting cannot fix was sent three times before `retry.py` could refuse
+  it. Measured against a local server; the clients now pass `max_retries=0`, and omega's own layer
+  covers what only the SDK had handled. The ChatGPT sign-in adapter, which has no SDK, now reads
+  `Retry-After` and stops on a usage limit. See `retry.py`'s docstring.
 - **`stream_options` may not be accepted by every OpenAI-compatible endpoint.** It is sent because
   without it a streamed response reports no usage at all and the cost counter silently reads zero.
   An older Ollama or vLLM build may reject it; the fix is a newer server, not per-endpoint guessing.

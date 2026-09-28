@@ -27,7 +27,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from typing import Any, cast
 
-from anthropic import APIStatusError, AsyncAnthropic, AuthenticationError
+from anthropic import APIConnectionError, APIStatusError, AsyncAnthropic, AuthenticationError
 from anthropic.types import MessageParam, ToolParam
 
 from omega_agent.events import (
@@ -446,6 +446,10 @@ class AnthropicProvider:
             # together. Measured, not assumed.
             api_key=None if self._oauth else resolved,
             auth_token=resolved if self._oauth else None,
+            # omega's loop is the only retry layer. The SDK's default of two
+            # retries ran under each of its attempts: nine requests for one 429,
+            # and a 429 that waiting cannot fix sent three times. Measured.
+            max_retries=0,
         )
 
 
@@ -517,7 +521,10 @@ class AnthropicProvider:
                 # emitted, restarting the stream would produce them a second time,
                 # so a late failure is reported with whatever arrived before it.
                 may_retry = emitted == 0 and attempt + 1 < self._retry.attempts
-                if may_retry and is_retryable(exc):
+                # A dropped connection or a timeout arrives as the SDK's own type,
+                # which `retry.py` cannot name without knowing the vendor.
+                transient = is_retryable(exc) or isinstance(exc, APIConnectionError)
+                if may_retry and transient:
                     await asyncio.sleep(
                         delay_for(attempt, self._retry, retry_after=retry_after_of(exc))
                     )

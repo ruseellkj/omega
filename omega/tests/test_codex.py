@@ -20,6 +20,7 @@ The frames below are shaped from the event names Tau handles
 from __future__ import annotations
 
 import json
+import time
 import typing
 from collections.abc import AsyncIterator
 from typing import Any
@@ -390,6 +391,68 @@ async def test_a_400_is_not_retried_and_a_429_is() -> None:
         )
         await _collect(provider)
     assert len(attempts) == 3, "a 429 must be retried to the policy limit"
+
+
+async def test_the_retry_waits_as_long_as_retry_after_says() -> None:
+    """**It retried on its own curve and ignored the server. Measured before the fix.**
+
+    `_HttpFailure` kept the status and the body and dropped the headers, so a
+    429 carrying `Retry-After: 4` was retried after 0.5 s and again after 1 s.
+    The other two adapters read the header, and so does Pi's codex adapter
+    (`openai-codex-responses.ts:146-165`). A retry the server has not allowed
+    yet is one more 429, and all three can land inside the wait.
+
+    `max_delay` is above the header on purpose: `delay_for` caps it there.
+    """
+    arrived: list[float] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        arrived.append(time.monotonic())
+        return httpx.Response(429, content=b"slow down", headers={"retry-after": "0.3"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = CodexProvider(
+            auth=_token,
+            account_id="a",
+            client=client,
+            retry=openai_codex.RetryPolicy(attempts=2, base_delay=0.0, max_delay=8.0),
+        )
+        await _collect(provider)
+
+    assert len(arrived) == 2
+    waited = arrived[1] - arrived[0]
+    assert waited >= 0.3, f"the server asked for 0.3 s and the retry came after {waited:.2f} s"
+
+
+#: The strings both references stop on (Pi `openai-codex-responses.ts:131`, Tau
+#: `openai_codex.py:1045-1052`). The bodies around them are minimal, not captured.
+USAGE_LIMITS = [
+    '{"error": {"type": "GoUsageLimitError", "message": "limit"}}',
+    '{"error": {"message": "Monthly usage limit reached"}}',
+    '{"error": {"type": "insufficient_quota", "message": "no credits"}}',
+]
+
+
+@pytest.mark.parametrize("body", USAGE_LIMITS)
+async def test_a_usage_limit_that_waiting_cannot_fix_is_sent_once(body: str) -> None:
+    """Retried as if it were "slow down". Measured before the fix: three requests.
+
+    The Anthropic and OpenAI adapters refuse this through
+    `is_permanent_quota_failure`, but its markers are those two vendors' prose.
+    The ChatGPT backend words its own, and both references list them.
+    """
+    attempts: list[httpx.Request] = []
+    async with _client(body.encode(), status=429, seen=attempts) as client:
+        provider = CodexProvider(
+            auth=_token,
+            account_id="a",
+            client=client,
+            retry=openai_codex.RetryPolicy(attempts=3, base_delay=0.0, max_delay=0.0),
+        )
+        events = await _collect(provider)
+
+    assert events[-1].type == "error"
+    assert len(attempts) == 1, f"a usage limit was sent {len(attempts)} times"
 
 
 async def test_a_failure_after_output_is_never_retried() -> None:

@@ -19,6 +19,16 @@ the partial content — which is the Tier 1 behaviour, unchanged.
 **Only some failures are worth retrying.** A 429 or a 503 is the server saying
 "not now"; a 400 is the server saying "not ever, that request is wrong". Retrying
 the second wastes time and hides the bug.
+
+**This is the only layer, and that was measured.** Both SDKs also retry twice by
+default, and the clients were first built without saying otherwise, so each
+attempt here hid two more: nine requests for one 429, 32 s instead of 8 s under
+`Retry-After: 4`, and a 429 that waiting cannot fix sent three times before the
+rule below could refuse it. The adapters now pass `max_retries=0`; Pi turns the
+SDK's loop off too (`anthropic-messages.ts:557`). This module took over what only
+the SDK had handled: any 5xx, the server's `x-should-retry` verdict, and a
+`retry-after-ms` header. A dropped connection arrives as each SDK's own exception
+type, so the adapter that knows the type adds that.
 """
 
 from __future__ import annotations
@@ -26,8 +36,9 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
-#: Server-side "try again": rate limits, timeouts, conflicts, and 5xx.
-_RETRYABLE_STATUS = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
+#: The 4xx statuses that still mean "try again": timeout, conflict, too early,
+#: rate limit. Every 5xx is retryable too; `is_retryable` says so in one line.
+_RETRYABLE_STATUS = frozenset({408, 409, 425, 429})
 
 #: Explicitly *not* retryable, listed to make the intent readable: the request
 #: itself is wrong, and sending it again changes nothing.
@@ -94,42 +105,59 @@ def is_retryable(exc: BaseException) -> bool:
     if isinstance(exc, asyncio.CancelledError):
         # Never. The user asked to stop.
         return False
+    status = getattr(exc, "status_code", None)
+    if status == 429 and is_permanent_quota_failure(exc):
+        # Ahead of the header: these markers come from real failures that repeat,
+        # and a server's hint is not worth three more of them.
+        return False
+    # The service's own verdict beats every rule below. Both SDKs read it first,
+    # and so does Pi's loop, which mirrors theirs (`provider-retry.ts:24-26`).
+    verdict = _header(exc, "x-should-retry")
+    if verdict in {"true", "false"}:
+        return verdict == "true"
     if isinstance(exc, ConnectionError | TimeoutError):
         return True
 
-    status = getattr(exc, "status_code", None)
     if not isinstance(status, int):
         return False
     if status in _FATAL_STATUS:
         return False
-    if status == 429 and is_permanent_quota_failure(exc):
-        return False
-    return status in _RETRYABLE_STATUS
+    # Any 5xx, as both SDKs and both references have it (Pi
+    # `provider-retry.ts:33`, Tau `anthropic.py:351`). The list stopped at 504
+    # and skipped 501, so it left out Anthropic's 529, "overloaded", among others.
+    return status in _RETRYABLE_STATUS or status >= 500
+
+
+def _header(exc: BaseException, name: str) -> str | None:
+    """One header of the response an SDK error carries, if it carries one."""
+    headers = getattr(getattr(exc, "response", None), "headers", None)
+    if headers is None:
+        return None
+    try:
+        value = headers.get(name)
+    except AttributeError:
+        return None
+    return value if isinstance(value, str) else None
 
 
 def retry_after_of(exc: BaseException) -> float | None:
     """The server's own advice, if it gave any.
 
     A `Retry-After` header beats any backoff curve we might invent: the service
-    knows when it will be ready and we are guessing.
+    knows when it will be ready and we are guessing. `retry-after-ms` is read
+    first, as both SDKs and Pi (`provider-retry.ts:52`) read it.
     """
-    response = getattr(exc, "response", None)
-    headers = getattr(response, "headers", None)
-    if headers is None:
-        return None
-    try:
-        raw = headers.get("retry-after")
-    except AttributeError:
-        return None
-    if raw is None:
-        return None
-    try:
-        seconds: float = float(raw)
-    except (TypeError, ValueError):
-        # A date-formatted Retry-After is legal and rare; fall back to backoff
-        # rather than parsing dates for it.
-        return None
-    return max(0.0, seconds)
+    for name, per_second in (("retry-after-ms", 1000.0), ("retry-after", 1.0)):
+        raw = _header(exc, name)
+        if raw is None:
+            continue
+        try:
+            return max(0.0, float(raw) / per_second)
+        except ValueError:
+            # A date-formatted Retry-After is legal and rare; fall back to backoff
+            # rather than parsing dates for it.
+            continue
+    return None
 
 
 def delay_for(attempt: int, policy: RetryPolicy, *, retry_after: float | None = None) -> float:

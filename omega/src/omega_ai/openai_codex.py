@@ -104,7 +104,7 @@ from omega_agent.types import (
     Usage,
     UserMessage,
 )
-from omega_ai.retry import DEFAULT_RETRY, RetryPolicy, delay_for
+from omega_ai.retry import DEFAULT_RETRY, RetryPolicy, delay_for, retry_after_of
 
 if TYPE_CHECKING:
     import httpx
@@ -125,6 +125,22 @@ ORIGINATOR = "codex_cli_rs"
 #: Statuses worth another attempt. 429 and 5xx are the provider asking for time;
 #: everything else is a request that will fail again identically.
 RETRYABLE_STATUS = frozenset({408, 409, 429, 500, 502, 503, 504})
+
+#: A 429 that waiting cannot fix, in the ChatGPT backend's words rather than the
+#: OpenAI API's and Anthropic's, which are what `retry.py` matches. Both
+#: references stop on exactly these (Pi `openai-codex-responses.ts:131`, Tau
+#: `openai_codex.py:1045-1052`); none was captured from a failure here.
+#: `usage_limit_reached` is not on the list, because Pi still retries it.
+USAGE_LIMIT_MARKERS = (
+    "gousagelimiterror",
+    "freeusagelimiterror",
+    "monthly usage limit reached",
+    "available balance",
+    "insufficient_quota",
+    "out of budget",
+    "quota exceeded",
+    "billing",
+)
 
 AuthResolver = Callable[[], Awaitable[str]]
 
@@ -439,7 +455,9 @@ class CodexProvider:
             except Exception as exc:  # noqa: BLE001 - this boundary converts all of them
                 may_retry = emitted == 0 and attempt + 1 < self._retry.attempts
                 if may_retry and _is_retryable(exc):
-                    await asyncio.sleep(delay_for(attempt, self._retry))
+                    await asyncio.sleep(
+                        delay_for(attempt, self._retry, retry_after=retry_after_of(exc))
+                    )
                     attempt += 1
                     continue
                 yield AssistantErrorEvent(
@@ -483,11 +501,11 @@ class CodexProvider:
         ) as response:
             if response.status_code >= 400:
                 body = (await response.aread()).decode(errors="replace")
-                raise _HttpFailure(response.status_code, body[:400])
+                raise _HttpFailure(response.status_code, body[:400], response)
 
             # **After the request is established**, so a connection failure or a
             # 429 leaves nothing emitted and the retry in `_stream` is still
-            # allowed to fire. `openai.py:417-419` carries the same note; this
+            # allowed to fire. `openai.py:481-482` carries the same note; this
             # adapter had it wrong first, and a test that asserted a 429 retries
             # is what found it.
             yield AssistantStartEvent(partial=partial)
@@ -669,9 +687,13 @@ def incomplete_ending(
 
 
 class _HttpFailure(Exception):
-    def __init__(self, status: int, body: str) -> None:
+    def __init__(self, status: int, body: str, response: httpx.Response | None = None) -> None:
         super().__init__(f"HTTP {status}: {body}")
         self.status = status
+        #: Kept for its headers. It first held only the status and the body, so
+        #: `Retry-After: 4` got a retry after 0.5 s. `retry_after_of` reads it
+        #: here the way it reads an SDK error's.
+        self.response = response
 
 
 class _StreamFailure(Exception):
@@ -680,6 +702,9 @@ class _StreamFailure(Exception):
 
 def _is_retryable(exc: BaseException) -> bool:
     if isinstance(exc, _HttpFailure):
+        detail = str(exc).lower()
+        if exc.status == 429 and any(marker in detail for marker in USAGE_LIMIT_MARKERS):
+            return False
         return exc.status in RETRYABLE_STATUS
     import httpx
 

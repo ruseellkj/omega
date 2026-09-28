@@ -113,11 +113,12 @@ allowed, so the server declines this one and expects you to try again shortly.
 |---|---|
 | 1st retry | 0.5s |
 | 2nd retry | 1.0s |
-| 3rd retry | 2.0s |
 | ceiling | 8.0s |
 
-Three attempts, then give up. Deliberately small: **a human is waiting.** Ninety
-seconds of silent backoff is worse than a clear failure they can react to.
+Three attempts, so two waits, then give up. The curve would give 2.0s next, but
+the third attempt is the last. Deliberately small: **a human is waiting.**
+Ninety seconds of silent backoff is worse than a clear failure they can react to.
+*Corrected 2026-09-28:* this table listed a 3rd retry at 2.0s, which never happens.
 
 No jitter, either — jitter exists to stop a *fleet* of clients retrying in
 lockstep, and omega is one client. A deterministic delay is also one less thing
@@ -130,13 +131,23 @@ it will be ready; we are guessing.
 ### Which failures are retried
 
 ```python
-_RETRYABLE_STATUS = {408, 409, 425, 429, 500, 502, 503, 504}   # "not now"
-_FATAL_STATUS     = {400, 401, 403, 404, 413, 422}             # "not ever"
+_RETRYABLE_STATUS = frozenset({408, 409, 425, 429})   # "not now", and every 5xx
+_FATAL_STATUS = frozenset({400, 401, 403, 404, 413, 422})   # "not ever"
 ```
 
 A 429 or 503 means *not now*. A 400 means *that request is malformed* — sending it
 again wastes time and hides the bug. `ConnectionError` and `TimeoutError` are
-retried; `asyncio.CancelledError` never is, because the user asked to stop.
+retried; `asyncio.CancelledError` never is, because the user asked to stop. A
+server's `x-should-retry` header, when it sends one, beats both lists.
+
+*Corrected 2026-09-28:* **this is now the only retry layer.** Both SDKs retry
+twice on their own by default, and omega first built its clients without saying
+otherwise, so one 429 cost nine requests (measured against a local server). The
+clients now pass `max_retries=0`; Pi turns the SDK's loop off too
+(`anthropic-messages.ts:557`). omega's layer took over what only the SDK had
+handled: every 5xx, not just 500, 502, 503 and 504 (501 and Anthropic's 529
+"overloaded" were missing), the `x-should-retry` header, a `retry-after-ms`
+header, and, in each adapter, the SDK's own connection-error type.
 
 ### Where it sits, and why that is the interesting part
 

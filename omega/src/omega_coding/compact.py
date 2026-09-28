@@ -124,12 +124,23 @@ DEFAULT_THRESHOLD = 0.8
 #: step, and it still keeps more than half of what fits. A smaller step moves the
 #: cut more often; a larger one forgets more at once.
 #:
-#: **What it costs.** Each step drops more than the minimum, so a compacted
-#: request carries less history than the tightest fit would. And it helps only
-#: when a step spans several units: when one turn is larger than a step, the cut
-#: moves nearly every turn anyway and the extra drop buys nothing. It is a
-#: fraction of the window, not of the budget, so with a `--compact-threshold` not
-#: far above it one step can take most of what fits.
+#: **What it costs, and the two guards.** Each step drops more than the minimum,
+#: so a compacted request carries less history than the tightest fit would. On
+#: 2026-09-28 that cost was measured far past the promise above in three cases.
+#: Ten 4,200-character reads in a 4,000-token window sent none of the two that
+#: fit. One 32,000-character read among small ones dragged the cut a whole step
+#: past what had to go, leaving 4,593 tokens of a 15,998 budget. And at
+#: `--compact-threshold 0.35` one step, a share of the window, was most of the
+#: budget. So:
+#:
+#: * the step shrinks with the threshold (`Compactor.step`), keeping the share of
+#:   the budget it has at the default; and
+#: * a step that would leave less than half the budget is not taken, and the
+#:   tightest fit goes instead (`_fit`).
+#:
+#: The second gives up the cache where it fires, since the tightest fit moves
+#: every turn. A turn nearly the size of a step moved the cut about that often
+#: anyway, so the extra history it kept was buying almost nothing.
 STEP_FRACTION = 0.3
 
 #: A result is never shrunk below this. Small enough not to matter, large enough
@@ -260,6 +271,18 @@ def _stepped(costs: list[int], minimum: int, step: int) -> int:
     return max(dropped, minimum)
 
 
+def _joined(
+    head: list[AgentMessage], rest: list[list[AgentMessage]], dropped: int
+) -> list[AgentMessage]:
+    """The request with the oldest `dropped` units cut and a note in their place."""
+    sent: list[AgentMessage] = list(head)
+    if dropped:
+        sent.append(UserMessage(content=_elision_note(dropped)))
+    for unit in rest[dropped:]:
+        sent.extend(unit)
+    return sent
+
+
 class Compactor:
     """A `transform_context` hook that keeps a request under the window.
 
@@ -300,6 +323,17 @@ class Compactor:
         """The automatic ceiling: what `__call__` holds the context under."""
         return self.budget_for(self.threshold)
 
+    @property
+    def step(self) -> int:
+        """How much the automatic pass drops at a time. See `STEP_FRACTION`.
+
+        Scaled down with a threshold below the default, never up, so the default
+        and anything above it keep the exact step they had. At 0.35 a 200,000
+        window's step is 26,249 tokens rather than 60,000, out of 70,000 that fit.
+        """
+        share = min(1.0, self.threshold / DEFAULT_THRESHOLD)
+        return int(self.window * STEP_FRACTION * share)
+
     def estimate(self, messages: list[AgentMessage]) -> int:
         """What these messages cost, on the same scale as `budget`."""
         return estimate_request_tokens(system="", messages=messages, tools=[])
@@ -311,7 +345,7 @@ class Compactor:
             # it is not needed is lost fidelity for nothing.
             return list(messages)
         # Read at call time, not construction: `/model` can change the window.
-        return self._fit(list(messages), self.budget, step=int(self.window * STEP_FRACTION))
+        return self._fit(list(messages), self.budget, step=self.step)
 
     def compact_to(self, messages: list[AgentMessage], fraction: float) -> list[AgentMessage]:
         """Compact to an explicit fraction of the window. What `/compact` calls.
@@ -370,14 +404,14 @@ class Compactor:
             used += cost
 
         dropped = len(rest) - kept
+        sent = _joined(head, rest, dropped)
         if step > 0 and dropped:
-            dropped = _stepped(costs, dropped, step)
-
-        sent: list[AgentMessage] = list(head)
-        if dropped:
-            sent.append(UserMessage(content=_elision_note(dropped)))
-        for unit in rest[dropped:]:
-            sent.extend(unit)
+            stepped = _joined(head, rest, _stepped(costs, dropped, step))
+            # The step's promise is that it "still keeps more than half of what
+            # fits". Where rounding to a turn boundary breaks it, the tightest
+            # fit goes instead. See "What it costs" on `STEP_FRACTION`.
+            if self.estimate(stepped) >= budget // 2:
+                sent = stepped
 
         # Dropping whole turns is not always enough — one turn can exceed the
         # whole budget on its own. Shrinking cannot orphan anything, because it

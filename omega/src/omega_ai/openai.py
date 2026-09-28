@@ -42,7 +42,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, cast
 
-from openai import APIStatusError, AsyncOpenAI, AuthenticationError
+from openai import APIConnectionError, APIStatusError, AsyncOpenAI, AuthenticationError
 
 from omega_agent.events import (
     TERMINAL_EVENT_TYPES,
@@ -329,6 +329,8 @@ class OpenAIProvider:
             # from refusing to construct.
             api_key=api_key or os.environ.get("OPENAI_API_KEY") or "not-needed",
             base_url=base_url or os.environ.get("OPENAI_BASE_URL"),
+            # omega's loop is the only retry layer; see the Anthropic adapter.
+            max_retries=0,
         )
 
 
@@ -398,7 +400,9 @@ class OpenAIProvider:
                     yield event
             except Exception as exc:  # noqa: BLE001 - this boundary converts all of them
                 may_retry = emitted == 0 and attempt + 1 < self._retry.attempts
-                if may_retry and is_retryable(exc):
+                # The SDK's connection and timeout errors; see the Anthropic adapter.
+                transient = is_retryable(exc) or isinstance(exc, APIConnectionError)
+                if may_retry and transient:
                     await asyncio.sleep(
                         delay_for(attempt, self._retry, retry_after=retry_after_of(exc))
                     )

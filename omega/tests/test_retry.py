@@ -15,6 +15,10 @@ behind it.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
+import httpx
 import pytest
 
 from omega_ai.retry import (
@@ -44,10 +48,32 @@ def test_server_side_try_again_is_retryable(status: int) -> None:
     assert is_retryable(_Status(status)) is True
 
 
+@pytest.mark.parametrize("status", [501, 520, 529])
+def test_a_5xx_outside_the_list_is_still_retried(status: int) -> None:
+    """Anthropic answers 529 when it is overloaded, and the list stopped at 504, skipping 501.
+
+    Nothing showed it while the SDK retried underneath: a 529 still got three
+    requests, all of them the SDK's. Both SDKs retry any status from 500 up, and
+    so do both references (Pi `provider-retry.ts:28-33`, Tau `anthropic.py:351`).
+    """
+    assert is_retryable(_Status(status)) is True
+
+
 @pytest.mark.parametrize("status", [400, 401, 403, 404, 413, 422])
 def test_a_bad_request_is_never_retried(status: int) -> None:
     """Sending it again changes nothing and hides the actual bug."""
     assert is_retryable(_Status(status)) is False
+
+
+def test_the_servers_own_retry_verdict_wins() -> None:
+    """`x-should-retry` is the service saying whether another attempt can work.
+
+    Both SDKs obey it before looking at the status, and Pi's loop, which mirrors
+    theirs, does the same (`provider-retry.ts:24-26`). While the SDK retried, it
+    was obeyed down there; omega's layer has to read it now.
+    """
+    assert is_retryable(_Status(503, {"x-should-retry": "false"})) is False
+    assert is_retryable(_Status(400, {"x-should-retry": "true"})) is True
 
 
 def test_a_dropped_connection_is_retryable() -> None:
@@ -89,6 +115,14 @@ def test_retry_after_is_still_capped() -> None:
 
 def test_a_retry_after_header_is_read() -> None:
     assert retry_after_of(_Status(429, {"retry-after": "2.5"})) == 2.5
+
+
+def test_a_retry_after_ms_header_is_read_first() -> None:
+    """Both SDKs read `retry-after-ms` before `retry-after`, and so does Pi
+    (`provider-retry.ts:52`). While the SDK retried, it read the header down
+    there; once its loop was off, nothing did."""
+    assert retry_after_of(_Status(429, {"retry-after-ms": "1500"})) == 1.5
+    assert retry_after_of(_Status(429, {"retry-after-ms": "250", "retry-after": "9"})) == 0.25
 
 
 def test_a_date_formatted_retry_after_falls_back_to_backoff() -> None:
@@ -287,9 +321,10 @@ def test_a_static_key_still_works() -> None:
 class _Status429(Exception):
     """Minimal stand-in for an SDK error: a status code and a body."""
 
-    def __init__(self, body: str) -> None:
+    def __init__(self, body: str, headers: dict[str, str] | None = None) -> None:
         super().__init__(body)
         self.status_code = 429
+        self.response = type("R", (), {"headers": headers or {}})()
 
 
 #: Both bodies are real, copied from failures hit while running omega.
@@ -338,6 +373,14 @@ def test_a_genuine_rate_limit_is_still_retried() -> None:
     assert is_retryable(_Status429(GENUINE_RATE_LIMIT))
 
 
+def test_a_429_that_waiting_cannot_fix_stays_refused_whatever_the_header_says() -> None:
+    """`x-should-retry: true` must not reopen these. The markers were copied
+    from real failures; what headers those real 429s carry nobody here can see,
+    and a server's hint is not worth three retries of a failure known to repeat."""
+    for body in (OPENAI_NO_CREDITS, ANTHROPIC_ZERO_LIMIT):
+        assert not is_retryable(_Status429(body, {"x-should-retry": "true"}))
+
+
 def test_the_message_names_the_right_remedy() -> None:
     """An error a user cannot act on is only half reported.
 
@@ -355,3 +398,174 @@ def test_the_message_names_the_right_remedy() -> None:
     anthropic_message = explain_anthropic(_Status429(ANTHROPIC_ZERO_LIMIT))  # type: ignore[arg-type]
     assert "set to 0" in anthropic_message
     assert "console" in anthropic_message.lower()
+
+
+# ------------------------------------- one retry layer, through the real clients
+#
+# Every test above hands the adapter a stub client, so none of them could see
+# the SDK's own retry loop. These build the client exactly as omega does and
+# swap only its transport, so the requests counted are the ones that would go
+# over the wire.
+
+RATE_LIMITED: dict[str, dict[str, Any]] = {
+    "anthropic": {"type": "error", "error": {"type": "rate_limit_error", "message": "slow down"}},
+    "openai": {
+        "error": {"message": "slow down", "type": "requests", "code": "rate_limit_exceeded"}
+    },
+}
+
+#: The two real bodies above, as the JSON the SDK receives.
+WAITING_CANNOT_FIX: dict[str, dict[str, Any]] = {
+    "anthropic": {
+        "type": "error",
+        "error": {
+            "type": "rate_limit_error",
+            "message": "This request would exceed the rate limit you configured in "
+            "workspace Anthropic Academy of 0 input tokens per minute.",
+        },
+    },
+    "openai": {
+        "error": {
+            "message": "You have no credits remaining.",
+            "type": "insufficient_quota",
+            "code": "credit_balance_exhausted",
+        }
+    },
+}
+
+OVERLOADED = {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}
+
+
+def _reply(
+    status: int, body: dict[str, Any], headers: dict[str, str] | None = None
+) -> Callable[[httpx.Request], httpx.Response]:
+    return lambda _request: httpx.Response(status, json=body, headers=headers)
+
+
+def _refused(request: httpx.Request) -> httpx.Response:
+    raise httpx.ConnectError("connection refused", request=request)
+
+
+def _aim_at(
+    monkeypatch: pytest.MonkeyPatch,
+    vendor: str,
+    respond: Callable[[httpx.Request], httpx.Response],
+) -> tuple[Any, list[httpx.Request]]:
+    """omega's provider, holding the client omega builds, pointed at `respond`.
+
+    Only the transport and the address change. Every argument omega passes to
+    the SDK is kept, so a retry setting omega adds, or forgets, is exactly what
+    gets counted.
+    """
+    import anthropic
+    import openai
+
+    from omega_ai import anthropic as anthropic_adapter
+    from omega_ai import openai as openai_adapter
+
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return respond(request)
+
+    module: Any = anthropic_adapter if vendor == "anthropic" else openai_adapter
+    sdk: Any = anthropic.AsyncAnthropic if vendor == "anthropic" else openai.AsyncOpenAI
+
+    def build(**kwargs: Any) -> Any:
+        kwargs["base_url"] = "http://sdk.test"
+        transport = httpx.MockTransport(handler)
+        return sdk(**kwargs, http_client=httpx.AsyncClient(transport=transport))
+
+    monkeypatch.setattr(module, sdk.__name__, build)
+    fast = RetryPolicy(attempts=3, base_delay=0.0)
+    if vendor == "anthropic":
+        return anthropic_adapter.AnthropicProvider(api_key="k", retry=fast), seen
+    return openai_adapter.OpenAIProvider(api_key="k", retry=fast), seen
+
+
+async def _drain(provider: Any) -> list[Any]:
+    return [
+        event
+        async for event in provider.stream_response(model="m", system="s", messages=[], tools=[])
+    ]
+
+
+@pytest.mark.parametrize("vendor", ["anthropic", "openai"])
+async def test_one_rate_limit_costs_three_requests_not_nine(
+    monkeypatch: pytest.MonkeyPatch, vendor: str
+) -> None:
+    """**The SDK retried underneath omega. Measured before the fix.**
+
+    Both SDKs retry twice by default (`DEFAULT_MAX_RETRIES = 2`), and omega built
+    its clients without `max_retries`. So each of omega's three attempts was
+    three requests: nine in all, about 5.5 s on localhost where the policy
+    allows 1.5 s, and 32 s rather than 8 s when the server sent
+    `Retry-After: 4`. Pi turns the SDK's loop off for the same reason
+    (`anthropic-messages.ts:557`, `openai-responses.ts:147`).
+    """
+    provider, seen = _aim_at(monkeypatch, vendor, _reply(429, RATE_LIMITED[vendor]))
+
+    events = await _drain(provider)
+
+    assert events[-1].type == "error"
+    assert len(seen) == 3, f"one rate-limited call sent {len(seen)} requests"
+
+
+@pytest.mark.parametrize("vendor", ["anthropic", "openai"])
+async def test_a_429_that_waiting_cannot_fix_is_sent_once(
+    monkeypatch: pytest.MonkeyPatch, vendor: str
+) -> None:
+    """`is_permanent_quota_failure` says never retry this, and it was right, but
+    the SDK had already sent the request three times before the rule ran."""
+    provider, seen = _aim_at(monkeypatch, vendor, _reply(429, WAITING_CANNOT_FIX[vendor]))
+
+    await _drain(provider)
+
+    assert len(seen) == 1, f"a 429 that waiting cannot fix was sent {len(seen)} times"
+
+
+@pytest.mark.parametrize("vendor", ["anthropic", "openai"])
+async def test_a_server_that_says_do_not_retry_is_obeyed(
+    monkeypatch: pytest.MonkeyPatch, vendor: str
+) -> None:
+    """The SDK obeyed `x-should-retry: false` and sent nothing more, and then
+    omega's layer, which never read the header, sent the request twice more."""
+    respond = _reply(429, RATE_LIMITED[vendor], {"x-should-retry": "false"})
+    provider, seen = _aim_at(monkeypatch, vendor, respond)
+
+    await _drain(provider)
+
+    assert len(seen) == 1, f"the server said stop and got {len(seen)} requests"
+
+
+@pytest.mark.parametrize(
+    ("vendor", "respond"),
+    [
+        ("anthropic", _reply(529, OVERLOADED)),
+        ("openai", _reply(529, OVERLOADED)),
+        ("anthropic", _refused),
+        ("openai", _refused),
+    ],
+    ids=["anthropic-529", "openai-529", "anthropic-refused", "openai-refused"],
+)
+async def test_what_the_sdk_used_to_retry_omega_still_retries(
+    monkeypatch: pytest.MonkeyPatch,
+    vendor: str,
+    respond: Callable[[httpx.Request], httpx.Response],
+) -> None:
+    """Turning the SDK's loop off hands its whole job to omega's. **This one
+    passed before the fix and failed after the first half of it.**
+
+    Two failures were retried *only* by the SDK. A 5xx outside omega's list,
+    such as 501 or Anthropic's 529 "overloaded", was one. A refused connection
+    reaches omega as the SDK's `APIConnectionError`, which is not the builtin
+    `ConnectionError` that `is_retryable` knows. With `max_retries=0` and
+    nothing else, each got one request.
+    """
+    provider, seen = _aim_at(monkeypatch, vendor, respond)
+
+    events = await _drain(provider)
+
+    assert events[-1].type == "error"
+    assert len(seen) == 3, f"expected omega's three attempts, got {len(seen)}"

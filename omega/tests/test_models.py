@@ -611,7 +611,7 @@ def test_a_compactor_built_at_startup_honours_the_overlay() -> None:
     "A model shipped today" usually means *starting* omega on it, not switching
     to it mid-session — and that is different code: `cli.py:681` builds
     `Compactor(model=..., system=..., tools=...)` with no explicit window, so
-    `Compactor.__init__` (`compact.py:221`) calls `window_for` itself rather
+    `Compactor.__init__` (`compact.py:304`) calls `window_for` itself rather
     than going anywhere near `set_model`.
 
     Every other test here drives `/model`. All of them would still pass if

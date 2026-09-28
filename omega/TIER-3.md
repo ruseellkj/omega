@@ -675,13 +675,13 @@ new turn over an intact conversation, not a rewind.
 | | Is partial usage available? |
 |---|---|
 | Anthropic | **yes** — input arrives in `message_start`, output accumulates in `message_delta`, so the partial already carries it |
-| OpenAI | **no** — usage is only ever sent in a final usage-only chunk *after* generation ends (`openai.py:438-453`), and the cancel returns at `:436` before that chunk exists |
+| OpenAI | **no** — usage is only ever sent in a final usage-only chunk *after* generation ends (`openai.py:502-521`), and the cancel returns at `:500` before that chunk exists |
 
 *Corrected 2026-09-28:* re-measured with the offline stubs, an Anthropic turn cancelled after
 `message_start` records its input tokens (11 in, 0 out), because the partial carries them; only the
 OpenAI turn is 0/0.
 
-omega already asks for it: `stream_options: {"include_usage": True}` is set at `openai.py:388`. The
+omega already asks for it: `stream_options: {"include_usage": True}` is set at `openai.py:452`. The
 number is not missing because nobody requested it; it was never sent.
 
 So OpenAI has to be estimated — `estimate_request_tokens(system, context, tools)` for input, which

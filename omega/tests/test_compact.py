@@ -288,6 +288,93 @@ async def test_consecutive_compacted_requests_share_their_prefix() -> None:
     assert shared >= 4, f"only {shared} of 5 consecutive requests extend the one before"
 
 
+# ------------------------------------------- a step must not cost more than it saves
+#
+# A step drops more than the minimum so the cut can hold still for the cache.
+# `compact.py` promised it "still keeps more than half of what fits". Three
+# shapes of conversation broke that promise, each measured before the fix.
+
+
+def _reads(sizes: list[int], *, finished: bool = False) -> list[AgentMessage]:
+    """The task, then one file read per size in characters, then maybe a reply."""
+    messages: list[AgentMessage] = [UserMessage(content="port the parser to the new API")]
+    for i, size in enumerate(sizes):
+        messages.extend(_turn_with_tool(f"call-{i}", "x" * size))
+    if finished:
+        reply = [TextContent(text="Done.")]
+        messages.append(AssistantMessage(model="test-model", stop_reason="stop", content=reply))
+    return messages
+
+
+def _reads_in(messages: list[AgentMessage]) -> int:
+    return sum(isinstance(m, ToolResultMessage) for m in messages)
+
+
+async def test_a_step_does_not_take_every_file_the_model_read() -> None:
+    """**It sent none of ten reads, where two fit.**
+
+    In a 4,000-token window a step is 1,200 tokens, and one 4,200-character read
+    is about 1,050. Eight reads had to go, about 8,400 tokens. Rounded up to
+    whole steps that is 9,600, and nine reads come to about 9,500, so the walk
+    took the tenth as well. What was sent was the task, the note and the last
+    reply: 58 tokens under a budget of 3,198.
+    """
+    compactor = _compactor()
+    transcript = _reads([4_200] * 10, finished=True)
+
+    sent = await compactor(transcript)
+
+    assert _reads_in(sent) == 2, f"sent {_reads_in(sent)} of the 2 reads that fit"
+    assert sent == compactor.compact_to(transcript, compactor.threshold)
+
+
+async def test_one_huge_result_does_not_drag_the_cut_past_half_of_what_fits() -> None:
+    """**It sent 4,593 tokens where 10,641 fit, under a budget of 15,998.**
+
+    Thirty 2,000-character reads and one of 32,000, in a 20,000-token window. A
+    step is 6,000 tokens and the big read about 8,000. The rounded-up amount
+    ended inside it, and a cut can only fall between turns, so all of it went:
+    6,048 tokens more than the tightest fit dropped, about a whole step.
+    """
+    compactor = _compactor(window=20_000)
+    sizes = [2_000] * 30
+    sizes[8] = 32_000
+
+    sent = await compactor(_reads(sizes))
+
+    assert compactor.estimate(sent) >= compactor.budget // 2, compactor.estimate(sent)
+
+
+async def test_a_low_threshold_keeps_half_of_what_fits_and_its_prefix() -> None:
+    """**At `--compact-threshold 0.35` it sent 1,065 tokens under a budget of 6,998.**
+
+    The step was 30% of the window, not of the budget, so one step (6,000
+    tokens) was most of what fits. Now it is 2,624, and the six requests here
+    run from 4,089 to 6,105 tokens. Both halves are checked: the request keeps
+    at least half of what fits, and the cut still holds still, because falling
+    back to the tightest fit every turn would keep the size and lose the cache.
+    """
+    compactor = _compactor(window=20_000, threshold=0.35)
+    transcript: list[AgentMessage] = [UserMessage(content="port the parser to the new API")]
+    requests: list[list[AgentMessage]] = []
+    turn = 0
+    while len(requests) < 6:
+        transcript.extend(_turn_with_tool(f"call-{turn}", "x" * 2_000))
+        turn += 1
+        sent = await compactor(transcript)
+        if len(sent) < len(transcript):
+            requests.append(sent)
+
+    sizes = [compactor.estimate(sent) for sent in requests]
+    assert min(sizes) >= compactor.budget // 2, sizes
+    shared = sum(
+        [m.model_dump_json() for m in after[: len(before)]]
+        == [m.model_dump_json() for m in before]
+        for before, after in zip(requests, requests[1:], strict=False)
+    )
+    assert shared >= 4, f"only {shared} of 5 consecutive requests extend the one before"
+
+
 # ------------------------------------------ conversations with nothing to shrink
 
 

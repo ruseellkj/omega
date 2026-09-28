@@ -52,10 +52,10 @@ One module per **wire format**, not per vendor.
 |---|---|---|---|
 | 14 | `provider.py` | 22 | A five-line re-export of the contract. The whole file is an argument about import direction. |
 | 15 | `fake.py` | 191 | The contract implemented trivially. Written *before* the real adapter, which is why the entire suite runs offline. |
-| 16 | `retry.py` | 146 | Which failures are worth retrying, and for how long. A 429 means "not now"; a 400 means "not ever". |
-| 17 | `anthropic.py` | 777 | One wire format. The messy file, deliberately — all the vendor ugliness lives here so nothing above it has any. Every stop reason the SDK declares is mapped on purpose; a tripwire test fails when an upgrade adds one. |
-| 18 | **`openai.py`** | **647** | A *different* wire format. **Read its docstring table first** — that comparison is the entire argument for the layer, and the tool-result row is the sharpest thing in the codebase. |
-| 18b | `openai_codex.py` | 789 | A **third** wire format, and the proof the layer was needed rather than tidy: a ChatGPT subscription opens `chatgpt.com/backend-api`, not `api.openai.com`, and speaks the Responses API. Read the docstring table against `openai.py`'s. |
+| 16 | `retry.py` | 174 | Which failures are worth retrying, and for how long. A 429 means "not now"; a 400 means "not ever". It is the only retry layer: both SDK clients are built with their own retries off. |
+| 17 | `anthropic.py` | 784 | One wire format. The messy file, deliberately — all the vendor ugliness lives here so nothing above it has any. Every stop reason the SDK declares is mapped on purpose; a tripwire test fails when an upgrade adds one. |
+| 18 | **`openai.py`** | **651** | A *different* wire format. **Read its docstring table first** — that comparison is the entire argument for the layer, and the tool-result row is the sharpest thing in the codebase. |
+| 18b | `openai_codex.py` | 814 | A **third** wire format, and the proof the layer was needed rather than tidy: a ChatGPT subscription opens `chatgpt.com/backend-api`, not `api.openai.com`, and speaks the Responses API. Read the docstring table against `openai.py`'s. |
 
 ---
 
@@ -80,7 +80,7 @@ neither imports it.
 | 26d | `tui/state.py` | 304 | **Tier 3.** What the screen shows. Imports no Textual. `load_messages` redraws a stored session, and is tested against a live turn rather than a list. |
 | 26e | `tui/adapter.py` | 137 | **Tier 3.** The 10 agent events -> screen state. |
 | 26f | `tui/app.py` | 1,111 | **Tier 3.** The screen. Steering becomes typeable here. Read "Copying and pasting" for why `ctrl+c` copies before it stops. |
-| 26a | `compact.py` | 458 | **Tier 3.** Fills `transform_context`. Cuts on turn boundaries so a tool call is never orphaned, and drops history in steps so the cached prefix survives more than one turn. |
+| 26a | `compact.py` | 492 | **Tier 3.** Fills `transform_context`. Cuts on turn boundaries so a tool call is never orphaned, and drops history in steps so the cached prefix survives more than one turn, unless a step would leave less than half of what fits. |
 | 27 | `cost.py` | 123 | What the run cost. Read why it ships **no price table**. |
 | 28 | `headless.py` | 143 | Run the agent with no keyboard. Also the benchmark interface, and at Tier 3+ a subagent is this function called from a tool. |
 | 29 | `evals.py` | 137 | Does the assembled agent still work? Not a test — read the docstring on the difference. |
