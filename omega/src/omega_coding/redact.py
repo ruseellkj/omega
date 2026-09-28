@@ -15,7 +15,8 @@ Two ordering decisions matter:
 
 1. **Specific key shapes run before the generic `NAME=value` rule.** Otherwise
    `token: ghp_...` gets reported as "a value called token" and the fact that it
-   was a *GitHub* token — the useful part — is lost.
+   was a *GitHub* token — the useful part — is lost. The generic rule then
+   skips a value that is already a placeholder, or it masks the label again.
 2. **The variable name survives.** `ANTHROPIC_API_KEY=[redacted]` tells the model
    the key is set, which is usually what it was checking. Masking the whole line
    would just send it looking again.
@@ -75,6 +76,47 @@ _ENV_ASSIGNMENT = re.compile(
     r"[A-Za-z0-9_]*)(?P<sep>\s*[=:]\s*)(?P<value>\S+)"
 )
 
+#: Values the catch-all leaves alone because no credential looks like them.
+#: **Masking one is not the safe direction.** The model reads source code
+#: through these tools, so `max_tokens=[redacted]` is what it edits, and it can
+#: write the placeholder back into the file. Measured on omega's own
+#: `DEFAULT_MAX_TOKENS = 4096`. Booleans, null and an empty string hold no
+#: secret under any name; masking an empty one also tells the model the key is
+#: set when it is not.
+_NEVER_A_SECRET = re.compile(r"""^["']?(?:true|false|none|null|nil|)["']?[,;)]*$""", re.I)
+
+#: A plain number, with the punctuation a line of code puts after it.
+_NUMBER = re.compile(r"""^["']?[+-]?\d[\d_.,]*["']?[,;)]*$""")
+
+#: Name parts that say a number is a *quantity* — `max_tokens`, `TOKEN_TTL`,
+#: `PASSWORD_MIN_LENGTH`. **A number alone is not enough**, because a password
+#: can be all digits (`DB_PASSWORD=12345678` stays masked): the name has to say
+#: the value counts something. Compared as whole parts of the name, so
+#: `SILENT_TOKEN` is not read as containing `LEN`.
+_QUANTITY_PARTS = frozenset(
+    {
+        "max", "min", "limit", "len", "length", "count", "size", "num", "budget",
+        "ttl", "timeout", "expiry", "expires", "seconds", "days", "tokens",
+        "bits", "bytes", "rounds",
+    }
+)
+
+#: Splits `MAX_TOKENS`, `max_tokens` and `maxTokens` into the same parts.
+_NAME_PART = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+")
+
+
+def _harmless(name: str, value: str) -> bool:
+    """Is this value one no credential could be, or one already masked?"""
+    # Already a placeholder from a specific rule above. Without this the
+    # catch-all read `[redacted` (up to the space) as a value and masked it
+    # again: `NAME=[redacted] Anthropic API key]`, two reports for one secret.
+    if value.lstrip("\"'").startswith("[redacted"):
+        return True
+    if _NEVER_A_SECRET.match(value):
+        return True
+    parts = {part.lower() for part in _NAME_PART.findall(name)}
+    return bool(_NUMBER.match(value)) and not parts.isdisjoint(_QUANTITY_PARTS)
+
 
 def redact(text: str) -> tuple[str, list[str]]:
     """Return the text with credentials masked, and what kinds were found.
@@ -94,9 +136,20 @@ def redact(text: str) -> tuple[str, list[str]]:
         found.append("bearer token")
         cleaned = _BEARER.sub(r"\1\2[redacted bearer token]", cleaned)
 
-    if _ENV_ASSIGNMENT.search(cleaned):
+    masked = 0
+
+    def mask(match: re.Match[str]) -> str:
+        nonlocal masked
+        if _harmless(match["name"], match["value"]):
+            return match[0]
+        masked += 1
+        return f"{match['indent']}{match['name']}{match['sep']}[redacted]"
+
+    cleaned = _ENV_ASSIGNMENT.sub(mask, cleaned)
+    # Reported from what was actually replaced, not from a match: a line the
+    # rule matched and then left alone must not make the UI say it hid something.
+    if masked:
         found.append("secret-looking environment value")
-        cleaned = _ENV_ASSIGNMENT.sub(r"\g<indent>\g<name>\g<sep>[redacted]", cleaned)
 
     return cleaned, found
 

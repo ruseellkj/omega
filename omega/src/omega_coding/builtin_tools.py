@@ -22,7 +22,7 @@ commands to prevent that is a game you lose. The shell is covered by the
 approval gate instead, and real containment is Tier 3+ sandboxing — for which
 `prepare_shell` below is the seam.
 
-**Tier 2.5 removed the fence from the file tools too**, so the paragraph above
+**The fence came out of the file tools too, after Tier 2**, so the paragraph above
 now describes all four rather than one. `paths.py` carries the argument; the
 short version is that both references and Claude Code work this way, and the gate
 in `approval.py` picked up the job — including asking about *reads* outside the

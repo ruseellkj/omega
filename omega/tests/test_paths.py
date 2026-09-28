@@ -152,7 +152,7 @@ def test_a_path_with_a_null_byte_is_refused(tmp_path: Path) -> None:
 
 
 def test_resolve_path_returns_outside_paths_instead_of_raising(tmp_path: Path) -> None:
-    """Tier 2.5's default. The fence's *judgement* survives; its refusal does not.
+    """The default since the fence came out. Its *judgement* survives; its refusal does not.
 
     `resolve_path` still has to be exactly as careful as the fence was — the gate
     downstream asks a human based on what this returns, so a path misjudged as
@@ -205,3 +205,26 @@ def test_is_inside_agrees_with_the_fence(tmp_path: Path) -> None:
         except PathOutsideRoot:
             refused = True
         assert inside is not refused, f"{case}: is_inside={inside} but fence refused={refused}"
+
+
+def test_a_tilde_means_the_home_directory_not_a_folder_called_tilde(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**Measured: `~/Downloads/notes.txt` resolved inside the project.**
+
+    `Path("~/x")` is a relative path whose first part is a folder literally named
+    `~` — pathlib expands nothing unless asked. So the model's ordinary way of
+    naming a file in the home directory landed at `<project>/~/Downloads/...`:
+    a read found nothing, and a write would have created a folder called `~`
+    in the project. Worse, the gate judged it *inside* the root.
+    """
+    home = tmp_path / "home"
+    (home / "Downloads").mkdir(parents=True)
+    root = tmp_path / "project"
+    root.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+
+    resolved = resolve_path("~/Downloads/notes.txt", root)
+
+    assert resolved == home.resolve() / "Downloads" / "notes.txt"
+    assert not is_inside(resolved, root)

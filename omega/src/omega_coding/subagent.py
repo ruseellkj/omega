@@ -136,7 +136,15 @@ def build_subagent_tool(
 
         # Not raised. A tool that raises into the parent loop is a tool that can
         # end the session, and the child failing is ordinary news.
-        if result.reason == "max_turns":
+        if result.cut_off:
+            # Said here because nothing else can: no screen shows the child's
+            # turns, so the parent reads this result and nothing more.
+            report = (
+                "The sub-agent's answer was cut off at the length limit, so it is "
+                "incomplete. Its conversation is not kept, so ask again for a smaller "
+                "part of the task."
+            )
+        elif result.reason == "max_turns":
             # `max_turns`, not `length`. Two different caps that both mean "it
             # stopped early": `length` is the *provider* running out of output
             # tokens, `max_turns` is the *loop* refusing to iterate again. This

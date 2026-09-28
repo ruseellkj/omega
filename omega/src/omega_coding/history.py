@@ -12,9 +12,9 @@ request.
 
 **This is the simpler sibling of the seam compaction uses at Tier 3.** Same idea,
 same signature: take what is kept, return what to send. `transform_context` is
-where the 880-line version goes; `convert_to_llm` is where this five-line version
-goes. That both exist now, with the smaller one doing real work, is what makes
-the larger one an addition later rather than a redesign.
+where compaction goes; `convert_to_llm` is where this five-line version goes.
+That both exist now, with the smaller one doing real work, is what makes the
+larger one an addition later rather than a redesign.
 """
 
 from __future__ import annotations

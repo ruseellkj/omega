@@ -20,7 +20,7 @@ Two habits worth having before you start:
 
 ## Package 1 · `omega_agent` — the portable core
 
-**1,580 lines.** Knows about messages, events, tools and turns. Knows nothing
+**2,359 lines** in the fourteen files below. Knows about messages, events, tools and turns. Knows nothing
 about files, vendors or terminals — and `tests/test_layers.py` fails if that ever
 stops being true.
 
@@ -31,58 +31,58 @@ stops being true.
 | 3 | `agent_events.py` | 166 | **The 10 agent events.** The whole run's progress. A separate file from the 12 on purpose — ask yourself why before reading the answer at the top. |
 | 4 | **`provider.py`** | **56** | **The contract. One method.** Read it three times. Then ask why it is in *this* package and not in `omega_ai`. |
 | 5 | `tools.py` | 97 | What a tool *is*: a schema plus a handler. Note why tools **raise** instead of returning an error flag. |
-| 6 | `hooks.py` | 112 | **The six seams.** Every one is a decision the loop refuses to make. This is why the loop never grew. |
+| 6 | `hooks.py` | 120 | **The seven seams.** Every one is a decision the loop refuses to make: six the loop calls, and `before_record`, which the harness calls before it stores a message. This is why the loop never grew. |
 | 7 | `cancellation.py` | 52 | The stop button. Twenty lines, and it *latches* — read why that matters. |
 | 8 | **`loop.py`** | **190** | **The machine.** Ask, run what was asked for, repeat. Find the stop condition — it is one line, and it reads content, not metadata. |
-| 9 | `tool_runner.py` | 116 | One tool call becomes one tool result. Never raises. Split out of `loop.py` when the loop hit 249 of its 250-line limit. |
-| 10 | `harness.py` | 497 | **Who owns the conversation.** Also the orphan repair, which is the fix for the nastiest bug in the whole project. Read `rewind` for why it cuts the file's path and not this list. |
-| 11 | `session/entries.py` | 48 | What one line of a saved session looks like. Note `parent_id`, present even though nothing branches yet. |
+| 9 | `tool_runner.py` | 163 | One tool call becomes one tool result. Never raises. Split out of `loop.py` when the loop hit 249 of its 250-line limit. Checks a call's required arguments before the gate, because a reply cut off mid-call arrives as `{}`. |
+| 10 | `harness.py` | 498 | **Who owns the conversation.** Also the orphan repair, which is the fix for the nastiest bug in the whole project. Read `rewind` for why it cuts the file's path and not this list. |
+| 11 | `session/entries.py` | 75 | What one line of a saved session looks like: three record kinds. Note `parent_id`, written a tier before anything branched, and `SessionBranch`, a rewind written down so it survives quitting. |
 | 12 | `session/jsonl.py` | 99 | Append-only writing, and a reader that survives a half-written last line. |
-| 13 | `session/store.py` | 310 | Where sessions live, behind an interface so the backend can change later. `path` is the conversation the next append continues, and `entries` is every branch. |
+| 12b | `session/tree.py` | 109 | **Tier 3.** The transcript is a tree. `path_to`, `leaves`, cycle detection. Before `store.py`, which imports it. |
+| 13 | `session/store.py` | 355 | Where sessions live, behind an interface so the backend can change later. `path` is the conversation the next append continues, and `entries` is every branch. `_tip` is the one rule for where the conversation ends, replayed from the file. |
 
 ---
 
 ## Package 2 · `omega_ai` — the vendors
 
-**1,201 lines.** The only code in the tree that knows Anthropic or OpenAI exist.
+**2,572 lines** in the six files below. The only code in the tree that knows Anthropic or OpenAI exist.
 One module per **wire format**, not per vendor.
 
 | # | File | Lines | What it is |
 |---|---|---|---|
 | 14 | `provider.py` | 22 | A five-line re-export of the contract. The whole file is an argument about import direction. |
-| 15 | `fake.py` | 184 | The contract implemented trivially. Written *before* the real adapter, which is why the entire suite runs offline. |
+| 15 | `fake.py` | 191 | The contract implemented trivially. Written *before* the real adapter, which is why the entire suite runs offline. |
 | 16 | `retry.py` | 146 | Which failures are worth retrying, and for how long. A 429 means "not now"; a 400 means "not ever". |
-| 17 | `anthropic.py` | 709 | One wire format. The messy file, deliberately — all the vendor ugliness lives here so nothing above it has any. |
-| 18 | **`openai.py`** | **580** | A *different* wire format. **Read its docstring table first** — that comparison is the entire argument for the layer, and the tool-result row is the sharpest thing in the codebase. |
-| 18b | `openai_codex.py` | 720 | A **third** wire format, and the proof the layer was needed rather than tidy: a ChatGPT subscription opens `chatgpt.com/backend-api`, not `api.openai.com`, and speaks the Responses API. Read the docstring table against `openai.py`'s. |
+| 17 | `anthropic.py` | 777 | One wire format. The messy file, deliberately — all the vendor ugliness lives here so nothing above it has any. Every stop reason the SDK declares is mapped on purpose; a tripwire test fails when an upgrade adds one. |
+| 18 | **`openai.py`** | **647** | A *different* wire format. **Read its docstring table first** — that comparison is the entire argument for the layer, and the tool-result row is the sharpest thing in the codebase. |
+| 18b | `openai_codex.py` | 789 | A **third** wire format, and the proof the layer was needed rather than tidy: a ChatGPT subscription opens `chatgpt.com/backend-api`, not `api.openai.com`, and speaks the Responses API. Read the docstring table against `openai.py`'s. |
 
 ---
 
 ## Package 3 · `omega_coding` — the application
 
-**1,842 lines.** Files, shells, policy, the screen. Imports the other two;
+**10,797 lines** in the thirty-three files below. Files, shells, policy, the screen. Imports the other two;
 neither imports it.
 
 | # | File | Lines | What it is |
 |---|---|---|---|
-| 19 | `paths.py` | 159 | **One resolver**, called by every file tool. Three plausible implementations are wrong and the docstring names them — still true after Tier 2.5 removed the *refusal*, because judging inside-from-outside is the same problem. |
+| 19 | `paths.py` | 169 | **One resolver**, called by every file tool. Two plausible implementations are wrong and the docstring names them, with a third it once called wrong that works on Python 3.14 — still the point now that the *refusal* is gone, because judging inside-from-outside is the same problem. A leading `~` is expanded first, or `~/x` would land inside the project. |
 | 20 | `file_lock.py` | 57 | One lock per file, keyed on the *resolved* path. |
 | 21 | `truncate.py` | 175 | The output budget: 2,000 lines or 50 KB, keeping the **tail**, because errors are at the end. |
-| 22 | `builtin_tools.py` | 812 | The four tools — read, write, edit, run — sitting behind everything above. |
-| 23 | `approval.py` | 374 | **The gate.** Fills `before_tool_call`. Note what it refuses outright versus what it asks about, and why the line is drawn where it is. |
-| 24 | `redact.py` | 194 | Keeps credentials out of the transcript. Fills `after_tool_call`. |
-| 24b | `commands.py` | 904 | **The command channel.** `/help`, `/clear`, `!cmd` — what tells the *program* something instead of asking the model. Note `dispatch` returns three things, and that `!cmd` reuses `execute_tool_call` rather than the shell. |
-| 25 | `history.py` | 42 | **Two views of history**: what is kept versus what is sent. The small sibling of the seam compaction will use at Tier 3. |
+| 22 | `builtin_tools.py` | 812 | The eight tools — read, write, edit, read an image, list, find, search, run — sitting behind everything above. |
+| 23 | `approval.py` | 449 | **The gate.** Fills `before_tool_call`. Note what it refuses outright versus what it asks about, why the line is drawn where it is, and which files an "always" does not cover. |
+| 24 | `redact.py` | 247 | Keeps credentials out of the transcript. Fills `after_tool_call` and `before_record`, so every message is masked, not only tool output. Note what it deliberately leaves alone. |
+| 24b | `commands.py` | 907 | **The command channel.** `/help`, `/clear`, `!cmd` — what tells the *program* something instead of asking the model. Note `dispatch` returns three things, and that `!cmd` reuses `execute_tool_call` rather than the shell. |
+| 25 | `history.py` | 42 | **Two views of history**: what is kept versus what is sent. The small sibling of the seam compaction uses. |
 | 26 | `context.py` | 187 | How full the context window is. Measures the problem `compact.py` fixes. |
 | 26b | `eventlog.py` | 160 | **Tier 3.** The second listener. Writes assembled messages, never deltas. |
-| 26c | `subagent.py` | 185 | **Tier 3.** A nested agent, as a tool calling `run_headless`. |
-| 26d | `tui/state.py` | 299 | **Tier 3.** What the screen shows. Imports no Textual. `load_messages` redraws a stored session, and is tested against a live turn rather than a list. |
-| 26e | `tui/adapter.py` | 130 | **Tier 3.** The 10 agent events -> screen state. |
+| 26c | `subagent.py` | 193 | **Tier 3.** A nested agent, as a tool calling `run_headless`. |
+| 26d | `tui/state.py` | 304 | **Tier 3.** What the screen shows. Imports no Textual. `load_messages` redraws a stored session, and is tested against a live turn rather than a list. |
+| 26e | `tui/adapter.py` | 137 | **Tier 3.** The 10 agent events -> screen state. |
 | 26f | `tui/app.py` | 1,111 | **Tier 3.** The screen. Steering becomes typeable here. Read "Copying and pasting" for why `ctrl+c` copies before it stops. |
-| 26g | `session/tree.py` | 101 | **Tier 3.** The transcript is a tree. `path_to`, `leaves`, cycle detection. |
-| 26a | `compact.py` | 377 | **Tier 3.** Fills `transform_context`. Cuts on turn boundaries so a tool call is never orphaned. |
+| 26a | `compact.py` | 458 | **Tier 3.** Fills `transform_context`. Cuts on turn boundaries so a tool call is never orphaned, and drops history in steps so the cached prefix survives more than one turn. |
 | 27 | `cost.py` | 123 | What the run cost. Read why it ships **no price table**. |
-| 28 | `headless.py` | 125 | Run the agent with no keyboard. Also the benchmark interface, and at Tier 3+ a subagent is this function called from a tool. |
+| 28 | `headless.py` | 143 | Run the agent with no keyboard. Also the benchmark interface, and at Tier 3+ a subagent is this function called from a tool. |
 | 29 | `evals.py` | 137 | Does the assembled agent still work? Not a test — read the docstring on the difference. |
 | 26h | `tui/widgets.py` | 766 | **Tier 3.** Every widget the screen is built from. The prompt box is the interesting one — see why `compact=True` was load-bearing, and why a newline is drawn as `↵`. |
 | 26i | `tui/banner.py` | 272 | The wordmark, the mascot, the startup facts, the compact header. Read why the splash shrinks rather than staying. |
@@ -92,13 +92,13 @@ neither imports it.
 | 26m | `tui/config.py` | 81 | Which theme you chose, and whether selecting text copies it, remembered. |
 | 24c | `env.py` | 86 | Finds `.env` by walking outward from where you are, nearest first. |
 | 24d | `system_prompt.py` | 125 | The standing instructions, and `OMEGA.md`. |
-| 24e | `status.py` | 316 | The working line, with labels that are true rather than generic. |
+| 24e | `status.py` | 329 | The working line, with labels that are true rather than generic. Also `CUT_OFF`, the one line every screen shows under a reply the length limit cut. |
 | 24f | `clipboard.py` | 224 | The system clipboard: the platform's own tool first, OSC 52 only when that fails or the session is remote. Pi's order and Pi's cap. Read why "copied" and "sent" are different words. |
 | 26n | `auth.py` | 384 | **Where a credential lives**, and the resolution order — `auth.json` → environment → nothing, reversed to follow Pi. Also `LoginRequiredProvider`, the provider that cannot answer and says why. |
 | 26o | `oauth.py` | 519 | Signing in with an account. PKCE, a loopback listener, the exchange, renewal — and the argument about whose client id omega presents. **Read the docstring before the code.** |
-| 26p | `models.py` | 560 | Which models each provider offers and how big their windows are. Three layers: built-ins, a models.dev refresh cache, and your own `models.json` on top. The single source `/model` and the compactor both read. |
-| 26q | `version.py` | 38 | Which build this is. Outside `tui/` on purpose: importing the banner would pull in Textual. |
-| 30 | **`cli.py`** | **1,001** | **Last.** The composition root: the only interactive entry point that picks a concrete provider. |
+| 26p | `models.py` | 568 | Which models each provider offers and how big their windows are. Three layers: built-ins, a models.dev refresh cache, and your own `models.json` on top. The single source `/model` and the compactor both read. |
+| 26q | `version.py` | 42 | Which build this is. Outside `tui/` on purpose: importing the banner would pull in Textual. |
+| 30 | **`cli.py`** | **1,016** | **Last.** The composition root: the only interactive entry point that picks a concrete provider. |
 
 ---
 

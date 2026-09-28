@@ -53,7 +53,7 @@ from omega_coding.env import USER_CONFIG, find_env_files, load_environment
 from omega_coding.eventlog import EventLog, sweep_old_logs
 from omega_coding.history import drop_empty_failed_turns
 from omega_coding.redact import redact_message, redacting_hook
-from omega_coding.status import StatusLine, describe
+from omega_coding.status import CUT_OFF, StatusLine, describe
 from omega_coding.subagent import build_subagent_tool
 from omega_coding.system_prompt import PROJECT_INSTRUCTIONS_FILE, build_system_prompt
 from omega_coding.truncate import sweep_old_spills
@@ -171,6 +171,10 @@ async def _run_print(harness: Harness, prompt: str) -> int:
     interrupt = _install_interrupt_handler(harness)
     reason = "error"
     wrote = False
+    # Whether the *last* reply was cut off. A cut-off turn that asked for a tool
+    # is followed by more turns and may still finish; only the final answer
+    # being incomplete makes the run a failure.
+    cut_off = False
 
     try:
         async for event in harness.run(prompt):
@@ -188,6 +192,10 @@ async def _run_print(harness: Harness, prompt: str) -> int:
                 if wrote:
                     sys.stdout.write("\n")
                     wrote = False
+                cut_off = event.message.stop_reason == "length"
+                if cut_off:
+                    sys.stdout.flush()
+                    print(f"  {CUT_OFF}", file=sys.stderr)
             elif event.type == "tool_execution_start":
                 print(f"  {describe(event.tool_call)}", file=sys.stderr)
             elif event.type == "agent_end":
@@ -200,7 +208,10 @@ async def _run_print(harness: Harness, prompt: str) -> int:
     if wrote:
         sys.stdout.write("\n")
     sys.stdout.flush()
-    return 0 if reason == "stop" else 1
+    # A cut-off answer ends the run as `stop` (see `CUT_OFF`), so the reason
+    # alone would exit 0 on half an answer. The notice is on stderr; a script
+    # reads the exit code.
+    return 0 if reason == "stop" and not cut_off else 1
 
 
 async def _run_turn(harness: Harness, prompt: str) -> None:
@@ -326,6 +337,10 @@ def _render(event: AgentEvent) -> None:
         marker = "x" if result.is_error else "<"
         first_line = result.text.splitlines()[0] if result.text else ""
         print(f"  {marker} {_clip(first_line, _RESULT_PREVIEW)}")
+
+    elif event.type == "message_end" and event.message.stop_reason == "length":
+        # Here and not on `agent_end`, which says `stop` for a cut-off reply.
+        print(f"\n[{CUT_OFF}]", file=sys.stderr)
 
     elif event.type == "agent_end" and event.reason == "aborted":
         # Not a failure - the user asked for it. Said plainly, because a

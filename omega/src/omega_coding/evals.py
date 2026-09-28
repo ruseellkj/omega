@@ -14,7 +14,7 @@ stopped mentioning the tools.
 Run it:
 
     uv run python -m omega_coding.evals            # scripted, offline, free
-    uv run python -m omega_coding.evals --real     # against the configured provider
+    uv run python -m omega_coding.evals --real     # against Anthropic's default model
 
 `anatomy.md:400` notes this shares its driver with terminal-bench. The driver is
 `headless.py`; this is one task pointed at it.

@@ -16,10 +16,12 @@ from pathlib import Path
 
 import pytest
 
+from omega_agent.agent_events import MessageEndEvent
+from omega_agent.events import AssistantDoneEvent
 from omega_agent.harness import Harness
 from omega_ai.fake import FakeProvider, text_turn, tool_turn
 from omega_coding.builtin_tools import build_tools
-from omega_coding.cli import _run_print, choose_mode, textual_is_available
+from omega_coding.cli import _render, _run_print, choose_mode, textual_is_available
 
 
 def _mode(**overrides: object) -> str:
@@ -116,6 +118,41 @@ async def test_print_mode_reports_failure_through_the_exit_code(tmp_path: Path) 
 
     assert await _run_print(harness, "do the thing") == 1
 
+
+
+async def test_print_mode_says_when_the_answer_was_cut_off(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A reply cut off at the length limit ended the run as `stop`, so `-p` printed
+    half an answer and exited 0 — to a script, a complete success.
+
+    The notice goes to stderr, so a redirect still captures only the answer, and
+    the exit code carries it, because a pipeline checks `$?` and not stderr.
+    """
+    harness = Harness(
+        provider=FakeProvider([text_turn("The three steps are: first,", stop_reason="length")]),
+        model="m",
+        system="s",
+        tools=build_tools(tmp_path),
+    )
+
+    code = await _run_print(harness, "list the steps")
+
+    captured = capsys.readouterr()
+    assert captured.out.strip() == "The three steps are: first,"
+    assert "cut off" in captured.err
+    assert code == 1, "an incomplete answer is not a success"
+
+
+def test_the_repl_says_when_a_reply_was_cut_off(capsys: pytest.CaptureFixture[str]) -> None:
+    """The same gap in the plain REPL's renderer: it printed the half answer and
+    then nothing, because it only reports `agent_end`, which said `stop`."""
+    final = text_turn("The three steps are: first,", stop_reason="length")[-1]
+    assert isinstance(final, AssistantDoneEvent)
+
+    _render(MessageEndEvent(message=final.message, stream_event=final))
+
+    assert "cut off" in capsys.readouterr().err
 
 
 # ------------------------------------------------- when the UI cannot be loaded

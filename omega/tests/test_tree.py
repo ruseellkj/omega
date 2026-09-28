@@ -105,6 +105,25 @@ def test_a_cycle_is_refused_rather_than_looped_forever() -> None:
     assert "a" in str(raised.value)
 
 
+def test_loading_a_cyclic_file_is_refused_rather_than_looped(tmp_path: Path) -> None:
+    """`load` no longer looks for a leaf, which is where it used to notice a
+    cycle. It walks back from the replayed tip instead, and `path_to` refuses
+    the loop there, so the refusal survived the change of rule."""
+    import json
+
+    from omega_agent.session import JsonlSessionStore
+
+    store = JsonlSessionStore(tmp_path, home=tmp_path)
+    session = store.create_session(model="m")
+    with store.path_for(session).open("a") as handle:
+        for entry_id, parent in (("a", "b"), ("b", "a")):
+            entry = _entry(entry_id, parent, entry_id)
+            handle.write(json.dumps(entry.model_dump(mode="json")) + "\n")
+
+    with pytest.raises(CycleInTranscript):
+        JsonlSessionStore(tmp_path, home=tmp_path).load(session)
+
+
 # --------------------------------------------------------------------- leaves
 
 
@@ -270,7 +289,13 @@ def _said(messages: list[Any]) -> list[str]:
 
 
 def test_path_is_the_conversation_the_next_append_continues(tmp_path: Path) -> None:
-    """What `rewind` cuts. Not `entries()`, which is every branch in write order."""
+    """What `rewind` cuts. Not `entries()`, which is every branch in write order.
+
+    **The last step changed meaning.** A fresh store, which is another process,
+    used to continue from the file's tail, because `branch_from` moved only an
+    in-memory pointer and nothing on disk said a rewind had happened. Now the
+    branch choice is a line in the file, so another process reads it and agrees
+    with this one: here, a conversation rewound to its very start."""
     from omega_agent.session import JsonlSessionStore
 
     store = JsonlSessionStore(tmp_path, home=tmp_path)
@@ -281,13 +306,15 @@ def test_path_is_the_conversation_the_next_append_continues(tmp_path: Path) -> N
 
     store.branch_from(session, store.entries(session)[0].id)
     assert [e.message.content for e in store.path(session)] == ["a"]
+    other = JsonlSessionStore(tmp_path, home=tmp_path)
+    assert [e.message.content for e in other.path(session)] == ["a"], "another process sees it"
 
     store.branch_from(session, None)
     assert store.path(session) == []
 
-    # Another process has never seen this session, and continues from its tail.
     fresh = JsonlSessionStore(tmp_path, home=tmp_path)
-    assert [e.message.content for e in fresh.path(session)] == ["a", "b", "c"]
+    assert fresh.path(session) == [], "the recorded branch choice, not the file's tail"
+    assert fresh.load(session) == []
 
 
 async def test_a_second_rewind_keeps_the_file_on_the_conversation_you_had(
@@ -352,15 +379,107 @@ async def test_after_compaction_rewind_takes_back_your_question_not_the_note(
 
 async def test_resuming_after_an_unanswered_rewind_saves_what_it_loaded(tmp_path: Path) -> None:
     """**Found in review, then measured.** A rewind with nothing asked after it
-    moves only the store's in-memory pointer. `resume` loads the newest leaf,
-    so in the same process memory said q1 a1 q2 a2 q3 while the file hung q3
-    off a1. The terminal UI keeps one store for its whole life, so `/rewind`
-    then `/resume` reached this. A fresh `--resume` of the same file loads the
-    newest leaf, and resuming in-process now means the same."""
+    moved only the store's in-memory pointer, and `resume` loaded the newest
+    leaf, so in the same process memory said q1 a1 q2 a2 q3 while the file hung
+    q3 off a1. The terminal UI keeps one store for its whole life, so `/rewind`
+    then `/resume` reached this.
+
+    **The property is unchanged: memory and the file agree.** What they agree
+    on changed. The first fix made `resume` move the pointer back to the newest
+    leaf, which kept them together by undoing the rewind. Now the rewind is a
+    line in the file, so resuming loads the conversation the rewind produced,
+    and the next question continues that."""
     harness, store = _saving_harness(tmp_path, 3)
     await _ask(harness, "q1", "q2")
     session = harness.session_id
     harness.rewind()
+
+    harness.resume(session)
+    await _ask(harness, "q3")
+
+    expected = ["q1", "a1", "q3", "a3"]
+    assert _said(harness.messages) == expected
+    assert _said(store.load(session)) == expected, "the file went its own way"
+
+
+async def test_a_rewind_survives_quitting_before_the_next_question(tmp_path: Path) -> None:
+    """**Measured before the fix.** Ask q1 and q2, rewind one question, quit.
+    A new process then resumed q1 a1 q2 a2, so the rewind was gone.
+
+    `branch_from` set only an in-memory pointer. `load` picked the newest leaf
+    in file order, and nothing on disk said a rewind had happened, so the
+    process that knew about it took the knowledge with it when it exited.
+
+    Opening a session must not write to it either. The old `resume` moved the
+    pointer through `branch_from`, and that now appends a line, so resuming
+    would have added one every time a session was opened."""
+    from omega_agent.harness import Harness
+    from omega_agent.session import JsonlSessionStore
+    from omega_ai.fake import FakeProvider, text_turn
+
+    harness, store = _saving_harness(tmp_path, 2)
+    await _ask(harness, "q1", "q2")
+    session = harness.session_id
+    assert session is not None
+    harness.rewind()
+
+    # Quit. Everything below is a new process: a fresh store, a fresh harness.
+    file = store.path_for(session)
+    lines = len(file.read_text().splitlines())
+    fresh_store = JsonlSessionStore(tmp_path, home=tmp_path)
+    fresh = Harness(
+        provider=FakeProvider([text_turn("a3")]),
+        model="m",
+        system="s",
+        tools=[],
+        store=fresh_store,
+    )
+
+    fresh.resume(session)
+    assert _said(fresh.messages) == ["q1", "a1"], "the rewind was lost"
+    assert len(file.read_text().splitlines()) == lines, "opening the session wrote to it"
+
+    await _ask(fresh, "q3")
+    entries = fresh_store.entries(session)
+    a1 = next(e for e in entries if _said([e.message]) == ["a1"])
+    q3 = next(e for e in entries if _said([e.message]) == ["q3"])
+    assert q3.parent_id == a1.id, "the next question hangs off a1 in the file"
+    assert _said(fresh_store.load(session)) == ["q1", "a1", "q3", "a3"]
+
+
+async def test_resuming_what_another_process_continued_saves_what_it_loaded(
+    tmp_path: Path,
+) -> None:
+    """The case `resume`'s old `branch_from` also covered, by accident. This
+    store's pointer still says a1 when another process adds q2 a2 to the same
+    session. Resuming loads q1 a1 q2 a2, and the next question must hang off a2,
+    not off a pointer that predates what is on screen. `load` refreshes the
+    pointer to the tip it just replayed, which writes nothing."""
+    from omega_agent.harness import Harness
+    from omega_agent.session import JsonlSessionStore
+    from omega_ai.fake import FakeProvider, text_turn
+
+    store = JsonlSessionStore(tmp_path, home=tmp_path)
+    harness = Harness(
+        provider=FakeProvider([text_turn("a1"), text_turn("a3")]),
+        model="m",
+        system="s",
+        tools=[],
+        store=store,
+    )
+    await _ask(harness, "q1")
+    session = harness.session_id
+    assert session is not None
+
+    elsewhere = Harness(
+        provider=FakeProvider([text_turn("a2")]),
+        model="m",
+        system="s",
+        tools=[],
+        store=JsonlSessionStore(tmp_path, home=tmp_path),
+    )
+    elsewhere.resume(session)
+    await _ask(elsewhere, "q2")
 
     harness.resume(session)
     await _ask(harness, "q3")

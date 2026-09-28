@@ -1,4 +1,4 @@
-"""The approval gate — all of beginner failure #4's destruction half since Tier 2.5.
+"""The approval gate — all of beginner failure #4's destruction half since the fence came out.
 
 At Tier 2 this shared the job with a fence: confinement bounded the file tools,
 and the gate covered the shell, which no path check can confine. **The fence is
@@ -578,3 +578,147 @@ async def test_under_confine_an_outside_path_is_refused_not_asked(
     assert (
         await policy(ToolCall(id="2", name="read_file", arguments={"path": "in.txt"}))
     ).allowed
+
+
+async def test_a_path_starting_with_a_tilde_is_judged_outside_the_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gate resolves through `resolve_path`, so it inherited the missing `~`
+    expansion: a read of `~/Downloads/notes.txt` counted as inside the project
+    and was never asked about. Now it is asked, and the prompt names the real
+    folder."""
+    home = tmp_path / "home"
+    (home / "Downloads").mkdir(parents=True)
+    root = tmp_path / "project"
+    root.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    asked: list[ApprovalRequest] = []
+
+    async def asker(request: ApprovalRequest) -> Answer:
+        asked.append(request)
+        return "deny"
+
+    policy = ApprovalPolicy(root, asker=asker)
+    decision = await policy(
+        ToolCall(id="1", name="read_file", arguments={"path": "~/Downloads/notes.txt"})
+    )
+
+    assert not decision.allowed
+    assert len(asked) == 1, "a read outside the root must be asked about"
+    assert asked[0].outside_root == (home / "Downloads").resolve()
+
+
+def test_every_tool_that_takes_a_path_is_in_the_gates_path_table(tmp_path: Path) -> None:
+    """**A tripwire, because the gap it guards is silent.**
+
+    The gate learns where a call reaches from `_PATH_ARGUMENTS`. A file tool
+    missing from it is never judged inside or outside the root: its prompt does
+    not say the path leaves the project, and its "always" is granted per tool
+    rather than per folder. `read_image` shipped that way. Nothing failed,
+    because nothing looked.
+    """
+    from omega_coding.approval import _PATH_ARGUMENTS
+    from omega_coding.builtin_tools import build_tools
+
+    takes_a_path = {
+        tool.name for tool in build_tools(tmp_path) if "path" in tool.parameters["properties"]
+    }
+
+    assert takes_a_path - set(_PATH_ARGUMENTS) == set()
+
+
+async def test_an_image_outside_the_root_is_asked_about_as_outside(tmp_path: Path) -> None:
+    """What the table entry buys: the prompt says the image is outside the
+    project, and "always" grants that one folder, not every image anywhere."""
+    root = tmp_path / "project"
+    root.mkdir()
+    shots = tmp_path / "shots"
+    other = tmp_path / "other"
+    asked: list[ApprovalRequest] = []
+
+    async def asker(request: ApprovalRequest) -> Answer:
+        asked.append(request)
+        return "always"
+
+    policy = ApprovalPolicy(root, asker=asker)
+    await policy(ToolCall(id="1", name="read_image", arguments={"path": str(shots / "a.png")}))
+    await policy(ToolCall(id="2", name="read_image", arguments={"path": str(shots / "b.png")}))
+    await policy(ToolCall(id="3", name="read_image", arguments={"path": str(other / "c.png")}))
+
+    assert [request.outside_root for request in asked] == [shots.resolve(), other.resolve()]
+
+
+async def test_always_for_writes_still_asks_about_files_that_steer_omega_or_git(
+    tmp_path: Path,
+) -> None:
+    """**Inside the root, "always" meant every file — including two that change
+    what happens later, outside this conversation.**
+
+    `OMEGA.md` is read into the system prompt at the next start
+    (`system_prompt.py`), so a write there changes omega's own instructions for
+    every later session. Anything under `.git/` changes what git does on the
+    user's next git command. One "always" for an ordinary edit authorised both
+    silently. These two are asked every time; everything else keeps the grant.
+    """
+    asked: list[ApprovalRequest] = []
+
+    async def asker(request: ApprovalRequest) -> Answer:
+        asked.append(request)
+        return "always"
+
+    policy = ApprovalPolicy(tmp_path, asker=asker)
+
+    async def write(path: str) -> None:
+        await policy(ToolCall(id=path, name="write_file", arguments={"path": path, "content": "x"}))
+
+    await write("a.txt")
+    await write("b.txt")
+    await write("OMEGA.md")
+    await write("OMEGA.md")
+    await write("omega.md")
+    await write("docs/OMEGA.md")
+    await policy(
+        ToolCall(
+            id="e",
+            name="edit_file",
+            arguments={"path": ".git/config", "old_text": "a", "new_text": "b"},
+        )
+    )
+
+    assert [request.arguments["path"] for request in asked] == [
+        "a.txt",
+        "OMEGA.md",
+        "OMEGA.md",
+        "omega.md",
+        ".git/config",
+    ], "b.txt and docs/OMEGA.md are covered by the grant; the root OMEGA.md and .git are not"
+    assert "every time" in asked[1].scope_note, "the prompt must not offer a grant it won't honour"
+
+
+async def test_yes_still_writes_the_files_always_does_not_cover(tmp_path: Path) -> None:
+    """`--yes` means "stop asking me", and it still does."""
+    policy = ApprovalPolicy(tmp_path, auto_approve=True)
+
+    decision = await policy(
+        ToolCall(id="1", name="write_file", arguments={"path": "OMEGA.md", "content": "x"})
+    )
+
+    assert decision.allowed
+
+
+async def test_always_for_writes_still_asks_about_the_project_env_file(tmp_path: Path) -> None:
+    """The same rule, for the file `env.py` loads at startup: the project's own
+    `.env` (`find_env_files`, nearest first). A write there changes omega's
+    configuration — which key, which endpoint — for every later session, so an
+    "always" given for editing the project does not cover it."""
+    asked: list[str] = []
+
+    async def asker(request: ApprovalRequest) -> Answer:
+        asked.append(request.arguments["path"])
+        return "always"
+
+    policy = ApprovalPolicy(tmp_path, asker=asker)
+    for path in ["a.txt", ".env", "sub/.env"]:
+        await policy(ToolCall(id=path, name="write_file", arguments={"path": path, "content": "x"}))
+
+    assert asked == ["a.txt", ".env"], "only the root .env is loaded, so only it keeps asking"

@@ -139,6 +139,11 @@ calls it without knowing or caring what's inside.
 That's why the loop never grew: the **880-line compaction subsystem** plugs in through exactly one
 of these callbacks (`transform_context`), and **the loop contains zero lines of compaction code.**
 
+> **Corrected 2026-09-28:** true of omega (`compact.py` on `transform_context`), not of Pi. Pi's
+> loop has zero lines of compaction too, but Pi runs it between runs (`agent-harness.ts:783-785`,
+> `agent-session.ts:1096` and `:1201`); its `transformContext` carries extension `context`
+> handlers. See `01-teardown/03b-context-sessions-compaction.md` §3.6.
+
 The nine hooks (Tau implements the first six, Pi all nine):
 
 | Hook | When the loop calls it | What L3 puts there |

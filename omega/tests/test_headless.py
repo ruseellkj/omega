@@ -72,6 +72,17 @@ async def test_text_is_the_last_thing_the_model_said() -> None:
     assert result.text == "the answer"
 
 
+async def test_an_answer_cut_off_at_the_length_limit_is_not_a_success() -> None:
+    """The run ends as `stop` — the loop stops on content — so `ok` said True
+    for half an answer. Everything that reads `ok` (the evals, the sub-agent
+    tool) then treated it as finished."""
+    result = await _run([text_turn("Found two of the", stop_reason="length")])
+
+    assert result.reason == "stop", "the loop's reason is unchanged"
+    assert result.cut_off is True
+    assert result.ok is False
+
+
 async def test_a_failed_run_is_reported_not_raised() -> None:
     result = await _run([tool_turn("ok", {}) for _ in range(5)], max_turns=2)
 

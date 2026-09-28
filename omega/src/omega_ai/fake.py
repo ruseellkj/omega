@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from omega_agent.events import (
     AssistantDoneEvent,
@@ -108,8 +108,15 @@ class FakeProvider:
 #   TextDeltaEvent        
 #   AssistantDoneEvent
 
-def text_turn(text: str, *, model: str = "fake-model") -> list[AssistantMessageEvent]:
-    """A turn that says something and asks for nothing. The loop should stop."""
+def text_turn(
+    text: str, *, model: str = "fake-model", stop_reason: Literal["stop", "length"] = "stop"
+) -> list[AssistantMessageEvent]:
+    """A turn that says something and asks for nothing. The loop should stop.
+
+    `stop_reason="length"` scripts a reply the provider cut off at its output
+    limit. The loop still stops, because it stops on content; what differs is
+    that the reply is incomplete, and the screens have to say so.
+    """
     partial = AssistantMessage(model=model) # the whole message so far
     events: list[AssistantMessageEvent] = [
         AssistantStartEvent(partial=partial.model_copy(deep=True))
@@ -132,8 +139,8 @@ def text_turn(text: str, *, model: str = "fake-model") -> list[AssistantMessageE
     )
 
     final = partial.model_copy(deep=True)
-    final.stop_reason = "stop"
-    events.append(AssistantDoneEvent(reason="stop", message=final))
+    final.stop_reason = stop_reason
+    events.append(AssistantDoneEvent(reason=stop_reason, message=final))
     return events
 
 

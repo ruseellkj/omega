@@ -223,7 +223,10 @@ async def _resume(context: CommandContext) -> Outcome:
             "\n  Sessions are not being saved (--no-save), so there is nothing to resume.\n"
         )
         return "handled"
-    if not context.store.load(session_id):
+    # Whether anything was ever written, not whether the conversation is empty.
+    # A session rewound past its first question loads as nothing, because the
+    # rewind is on disk, and it still exists.
+    if not context.store.entries(session_id):
         context.emit(f"\n  No session {session_id} for this project. Try /sessions.\n")
         return "handled"
 

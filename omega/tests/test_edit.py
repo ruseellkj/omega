@@ -129,7 +129,7 @@ async def test_it_follows_the_same_path_rules_as_every_other_file_tool(
     """Inherited for free, in both directions.
 
     `edit_file` never had path logic of its own — it calls whatever the factory
-    was given. So when the fence moved out of the tools at Tier 2.5, edit
+    was given. So when the fence moved out of the tools after Tier 2, edit
     followed without being touched, and `--confine` brings it back the same way.
     That is the argument for one resolution point rather than four, tested rather
     than asserted.

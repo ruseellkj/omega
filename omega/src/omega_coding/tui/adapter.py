@@ -19,6 +19,7 @@ screen can do something a printer cannot:
 | *(ignored)* | `message_end` → token counts |
 | `agent_end` aborted → `[cancelled]` | a `notice` row |
 | `agent_end` not stop → `[reason] message` | a `notice` row |
+| `message_end` cut off → `CUT_OFF` | a `notice` row |
 
 The three that differ, and why:
 
@@ -43,7 +44,7 @@ to that. See `state.py` for why the split earns its keep.
 from __future__ import annotations
 
 from omega_agent.agent_events import AgentEvent
-from omega_coding.status import describe
+from omega_coding.status import CUT_OFF, describe
 from omega_coding.tui.state import TuiState
 
 
@@ -114,6 +115,12 @@ class TuiEventAdapter:
             state.tokens_out += usage.output
             state.tokens_cached += usage.cache_read
             state.thinking = False
+            if event.message.stop_reason == "length":
+                # Under the text it belongs to, and above any tool rows, which
+                # open after this event. `agent_end` cannot carry it: the run
+                # still ends as `stop` (see `CUT_OFF`).
+                state.close_stream()
+                state.add("notice", CUT_OFF)
 
         elif event.type == "agent_end":
             state.close_stream()

@@ -38,7 +38,7 @@ from omega_agent.types import (
     ToolResultMessage,
     UserMessage,
 )
-from omega_coding.status import describe
+from omega_coding.status import CUT_OFF, describe
 
 #: What a row is. `notice` covers cancellation, errors and the steering
 #: acknowledgement — anything omega says about itself rather than relaying.
@@ -204,7 +204,9 @@ class TuiState:
         A failed or cancelled turn ends in a notice. Live, that comes from
         `agent_end`, which is not stored. Its reason is, on the assistant message
         (`loop.py:123` copies it from there), so the notice is rebuilt from it in
-        the adapter's wording.
+        the adapter's wording. A reply cut off at the length limit gets its
+        notice from the same field, and live it comes from `message_end`, not
+        `agent_end` — so it sits under the text and above any tool rows here too.
 
         Tau does the same job in the same place (`tau_coding/tui/state.py:297`,
         `load_messages`), but walks blocks in order, because its live renderer
@@ -218,6 +220,9 @@ class TuiState:
                 for block in message.content:
                     if isinstance(block, TextContent) and block.text.strip():
                         self.add("assistant", block.text)
+                if message.stop_reason == "length":
+                    # Before the tool rows, where the live adapter puts it.
+                    self.add("notice", CUT_OFF)
                 for call in message.tool_calls:
                     calls[call.id] = call
                     self.open_tool(call.id, call.name, call.arguments, describe(call))

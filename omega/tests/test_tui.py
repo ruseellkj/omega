@@ -308,6 +308,38 @@ def test_a_restored_failed_turn_says_what_the_live_one_said() -> None:
     assert _shape(replayed) == _shape(live)
 
 
+async def test_a_reply_cut_off_at_the_length_limit_says_so_live_and_resumed(
+    tmp_path: Path,
+) -> None:
+    """**Measured: a cut-off answer ended as a clean finish.**
+
+    The loop stops on content, so a reply the provider cut off at its length
+    limit ends the run with `reason="stop"`, exactly like a finished one. Only
+    the stored message knew (`stop_reason="length"`), and neither screen read it:
+    half an answer looked like a whole one, with no hint to ask for the rest.
+
+    Checked live and replayed, because the notice has to survive `/resume` the
+    way the error and cancel notices do.
+    """
+    harness = Harness(
+        provider=FakeProvider([text_turn("The three steps are: first,", stop_reason="length")]),
+        model="m",
+        system="s",
+        tools=build_tools(tmp_path),
+    )
+    live, adapter = _adapter()
+    live.add("user", "list the steps")
+    async for event in harness.run("list the steps"):
+        adapter.apply(event)
+
+    replayed = TuiState()
+    replayed.load_messages(harness.messages)
+
+    assert [row.kind for row in live.rows] == ["user", "assistant", "notice"]
+    assert "cut off" in live.rows[-1].text
+    assert _shape(replayed) == _shape(live)
+
+
 # --------------------------------------------------- the reason the TUI exists
 
 

@@ -48,13 +48,18 @@ def _tool_path() -> list[Any]:
     ]
 
 
-def _happy_path(cache_read: int = 0, cache_write: int = 0) -> list[Any]:
+def _happy_path(
+    cache_read: int = 0, cache_write: int = 0, stop_reason: str | None = "end_turn"
+) -> list[Any]:
     """The minimum well-formed stream: a message that says "hi" and stops.
 
     The cache counters are attached only when non-zero, so the default stream
     keeps the shape of an API that never heard of prompt caching — which is also
     the shape Ollama, vLLM and Groq present through the OpenAI adapter. The
     adapter has to survive both.
+
+    `stop_reason` is how the stream ends, so a test can end it the way a
+    refusal or an overflow does and check what the adapter makes of it.
     """
     usage: Any = SimpleNamespace(input_tokens=11)
     if cache_read or cache_write:
@@ -73,7 +78,7 @@ def _happy_path(cache_read: int = 0, cache_write: int = 0) -> list[Any]:
         SimpleNamespace(type="content_block_stop", index=0),
         SimpleNamespace(
             type="message_delta",
-            delta=SimpleNamespace(stop_reason="end_turn"),
+            delta=SimpleNamespace(stop_reason=stop_reason),
             usage=SimpleNamespace(output_tokens=2),
         ),
     ]
@@ -123,7 +128,7 @@ class _Messages:
         events = (
             _tool_path()
             if client.script == "tool"
-            else _happy_path(client.cache_read, client.cache_write)
+            else _happy_path(client.cache_read, client.cache_write, client.stop_reason)
         )
         return _Stream(events, fail_after=client.fail_midstream_after, error=client.error)
 
@@ -144,8 +149,10 @@ class StubClient:
         script: str = "text",
         cache_read: int = 0,
         cache_write: int = 0,
+        stop_reason: str | None = "end_turn",
     ) -> None:
         self.script = script
+        self.stop_reason = stop_reason
         self.cache_read = cache_read
         self.cache_write = cache_write
         self.fail_times = fail_times

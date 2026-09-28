@@ -39,6 +39,7 @@ import asyncio
 import json
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any, cast
 
 from openai import APIStatusError, AsyncOpenAI, AuthenticationError
@@ -224,17 +225,76 @@ def to_openai_messages(system: str, messages: list[AgentMessage]) -> list[dict[s
     return out
 
 
-def normalise_finish_reason(raw: str | None, *, has_tool_calls: bool) -> DoneReason:
-    """`finish_reason` to the same three values the other adapter produces.
+@dataclass(frozen=True, slots=True)
+class AbnormalStop:
+    """A `finish_reason` that is not a finish, and what to tell the user about it.
+
+    The same shape as `anthropic.AbnormalStop`, written out again rather than
+    shared: each adapter owns its vendor's mapping and inherits from nothing, as
+    `_error_message` and `_explain` already are. A value rather than an
+    exception, so the stream still ends with one terminal event that holds the
+    partial reply.
+    """
+
+    message: str
+
+
+_KEPT = "The reply so far is kept."
+
+#: **Every value the SDK declares for a chunk's `finish_reason`**, mapped on
+#: purpose. Checked against the installed SDK (3.3.1) by
+#: `test_every_finish_reason_the_sdk_declares_is_mapped_on_purpose`, so an
+#: upgrade that adds a value fails a unit test rather than landing here unseen.
+#:
+#: `content_filter` used to fall through to `stop`, so a reply the provider's
+#: filter cut off read as a finished answer. Pi makes it an error too
+#: (`openai-completions.ts:1365-1389`).
+FINISH_REASONS: dict[str, DoneReason | AbnormalStop] = {
+    "stop": "stop",
+    "tool_calls": "toolUse",
+    # The deprecated single-function spelling. This adapter reads only
+    # `delta.tool_calls`, so content decides, as it does everywhere.
+    "function_call": "toolUse",
+    "length": "length",
+    "content_filter": AbnormalStop(
+        f"The provider's content filter stopped the reply (finish reason 'content_filter'). {_KEPT}"
+    ),
+}
+
+
+def normalise_finish_reason(
+    raw: str | None, *, has_tool_calls: bool
+) -> DoneReason | AbnormalStop:
+    """`finish_reason` to the same three values the other adapter produces, or
+    why it is not one.
 
     Content first, exactly as in the Anthropic adapter: if the response carries
-    tool calls then it is a tool-use turn, whatever the vendor labelled it.
+    tool calls then it is a tool-use turn, whatever the vendor labelled it. That
+    has to stay ahead of the table, because an `error` ending stops the loop and
+    would leave those calls unanswered.
+
+    **An unknown value is an error, not a finish, and that has a cost here that
+    Anthropic does not have.** `--base-url` points this adapter at Ollama, vLLM,
+    Groq and anything else that speaks the format, and one of them may send a
+    value the SDK never declared. It now shows an error after its answer instead
+    of passing silently. That is the trade chosen: the answer is still there, and
+    the message names the value, so the fix is one table row, where the old
+    fallback to `stop` hid every new kind of ending forever. Pi makes the same
+    call, and its table also accepts `end` (`openai-completions.ts:1371`); omega
+    has not seen that value, so it is not added on faith. A missing value is a
+    finish, since some servers send none.
     """
-    if has_tool_calls or raw == "tool_calls":
+    if has_tool_calls:
         return "toolUse"
-    if raw == "length":
-        return "length"
-    return "stop"
+    if raw is None:
+        return "stop"
+    known = FINISH_REASONS.get(raw)
+    if known is not None:
+        return known
+    return AbnormalStop(
+        f"The provider ended the reply with a finish reason omega does not know ({raw!r}). "
+        f"{_KEPT}"
+    )
 
 
 # ------------------------------------------------------------------- adapter
@@ -538,6 +598,13 @@ class OpenAIProvider:
 
             final = partial.model_copy(deep=True)
             reason = normalise_finish_reason(finish, has_tool_calls=bool(final.tool_calls))
+            if isinstance(reason, AbnormalStop):
+                # The same ending every other failure gets: the text that arrived
+                # is kept, and the message says what happened in its place.
+                yield AssistantErrorEvent(
+                    reason="error", error=self._error_message(partial, reason.message)
+                )
+                return
             final.stop_reason = reason
             yield AssistantDoneEvent(reason=reason, message=final)
 

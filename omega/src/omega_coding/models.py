@@ -41,6 +41,14 @@ Tau's merge is the one copied here, down to the semantics:
 — a **union**, overlay first. Your entries go on top of the built-ins, not
 instead of them, so adding one model keeps the other eleven.
 
+**What is copied from Tau is the snapshot and the merge, not the user file's
+job.** Tau sends a new first-party model through its shipped catalog and a
+release (`data/docs/models.md:11-20`); its `~/.tau/catalog.toml` is written by
+the program, for custom providers (`provider_config.py:967-980`). A file the
+user edits by hand to add a first-party model the morning it ships is omega's
+own answer to the problem above. An earlier version of this docstring presented
+it as Tau's.
+
 ## What the overlay may add: models, not providers
 
 Tau's overlay can introduce a whole provider, because a Tau catalog entry

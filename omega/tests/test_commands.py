@@ -229,6 +229,26 @@ async def test_resume_of_an_unknown_id_does_not_wipe_the_conversation(
     assert "No session" in capsys.readouterr().out
 
 
+async def test_resume_of_a_session_rewound_to_its_start_is_not_unknown(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A rewind is now written down, so a session rewound past its first
+    question loads as an empty conversation. That is the right answer, and it
+    is not the same as a session that does not exist, which is what checking
+    `load()` for emptiness took it for."""
+    context = _context(tmp_path)
+    async for _ in context.harness.run("an only question"):
+        pass
+    session = context.harness.session_id
+    context.harness.rewind()
+    await dispatch("/clear", context)
+
+    assert await dispatch(f"/resume {session}", context) == "handled"
+
+    assert "No session" not in capsys.readouterr().out
+    assert context.harness.session_id == session
+
+
 # ----------------------------------------------------- the read-only reporters
 
 

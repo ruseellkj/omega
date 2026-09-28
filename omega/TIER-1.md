@@ -23,7 +23,7 @@ What this tier contains, and what it deliberately does not.
 | Fake provider + script builders | `providers/fake.py` | Proves the interface is small; makes everything testable offline |
 | Anthropic adapter with real streaming | `providers/anthropic.py` | The only file that knows a vendor exists |
 | Exactly one `start`, one terminal event | `providers/anthropic.py` | The loop never needs a timeout or a sentinel |
-| Stop reasons normalised to 3 values | `providers/anthropic.py` | `tool_use`→`toolUse`, `max_tokens`→`length`, else `stop` |
+| Stop reasons normalised to 3 values | `providers/anthropic.py` | `tool_use`→`toolUse`, `max_tokens`→`length`, else `stop`. *Since 2026-09-28 there is no "else": every value the SDK declares is mapped on purpose, and an abnormal or unknown one (a refusal, a content filter) ends as an error that keeps the reply* |
 | **Errors as events, never raised** | `providers/anthropic.py` | A stream that failed after 500 tokens keeps the 500 tokens |
 | Readable auth / credit-balance errors | `providers/anthropic.py` | Because a stack trace for "no credits" is useless |
 | Tool results merged into one user message | `providers/anthropic.py` | Anthropic rejects split results from a parallel turn |

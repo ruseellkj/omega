@@ -120,7 +120,7 @@ not block the feature; it identified which part of the file had stopped being th
 | Capability | File | Why it exists |
 |---|---|---|
 | **`edit` tool** | `builtin_tools.py` | Exact-match replace, unique match required. Whole-file writes are hopeless past a few hundred lines |
-| **Path resolution** | `paths.py` | **One** resolver, called by every filesystem tool. Symlinks resolved before the inside/outside verdict — failure **#4**. Tier 2 refused outside paths here; Tier 2.5 moved that to the gate and kept the refusal behind `--confine` |
+| **Path resolution** | `paths.py` | **One** resolver, called by every filesystem tool. Symlinks resolved before the inside/outside verdict — failure **#4**. Tier 2 refused outside paths here; after Tier 2 closed, that moved to the gate and the refusal stayed behind `--confine` |
 | **Per-path write lock** | `file_lock.py` | Keyed on the *resolved* path, shared by `write` and `edit` — failure **#8** |
 | **Approval gate** | `approval.py` | Fills `before_tool_call`. Prompts on shell and writes, remembers the answer, blanket-denies the catastrophes |
 | Secret redaction | `redact.py` | Fills `after_tool_call`. Key-shaped strings never reach the model or a log |
@@ -181,7 +181,7 @@ wrong and that is the thing to fix.
 
 | Missing | What it costs | The seam it plugs into |
 |---|---|---|
-| **Compaction** — failure **#1** | Long tasks still die at the context limit. Tier 2 only *shows* you the wall approaching | `transform_context`, wired and doing real work in Tier 2. Pi's 880-line compaction subsystem plugs into exactly this one callback, and the loop contains **zero** lines of it |
+| **Compaction** — failure **#1** | Long tasks still die at the context limit. Tier 2 only *shows* you the wall approaching | `transform_context`, wired and doing real work in Tier 2. Pi's loop contains **zero** lines of compaction too, but not because of this callback. *Corrected 2026-09-28:* this row said Pi's compaction plugs into `transformContext`. It does not. Pi runs it between runs (`agent/src/harness/agent-harness.ts:783-785`; in the coding agent, `agent-session.ts:1096` after a run and `:1201` before the next prompt), and Pi's `transformContext` runs extension `context` handlers (`agent-harness.ts:493`, `sdk.ts:350-354`). Both keep compaction out of the loop, by different routes |
 | **Prompt caching** — failure **#9** | Every turn re-bills the system prompt and the whole tool schema block | Not a hook — a *constraint*. Cache markers need a byte-identical prefix, which is why `OMEGA.md` is prepended once at startup and never regenerated per turn |
 
 ### Things Tier 3 adds next
@@ -277,7 +277,7 @@ lands without surgery.
 - **Ctrl-C during an approval prompt does not return immediately.** The prompt reads stdin on a
   worker thread, and a signal cannot interrupt a blocked `input()`. The cancellation is recorded
   and takes effect as soon as the prompt is answered.
-- **Nothing is sandboxed.** The approval gate is policy, not containment — and since Tier 2.5 it is the *only* control on where the file tools reach, `--confine` aside.
+- **Nothing is sandboxed.** The approval gate is policy, not containment — and since the fence came out after Tier 2, it is the *only* control on where the file tools reach, `--confine` aside.
 - **The retry wrapper is duplicated between the two adapters.** Same shape in `anthropic.py` and
   `openai.py`, because it is provider-layer *machinery* rather than vendor translation.
   `providers/streaming.py` is the obvious next refactor. Worth noting where the duplication sits:

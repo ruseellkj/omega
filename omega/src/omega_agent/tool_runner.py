@@ -19,6 +19,7 @@ reached through `hooks`.
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from omega_agent.hooks import AgentHooks
 from omega_agent.tools import Tool, ToolResult
@@ -33,8 +34,9 @@ async def execute_tool_call(
 ) -> ToolResultMessage:
     """Run one tool. Never raises.
 
-    Every outcome — success, unknown tool, cancellation, refusal, crash — becomes
-    a normal tool result. The model reads failures as observations and adapts,
+    Every outcome — success, unknown tool, cancellation, missing arguments,
+    refusal, crash — becomes a normal tool result. The model reads failures as
+    observations and adapts,
     which is the entire point of an agent loop. An exception here would end the
     run instead. A *refusal* is in that list for a sharper reason: an unanswered
     tool call is rejected by providers forever, so "no" must still be an answer.
@@ -45,6 +47,11 @@ async def execute_tool_call(
 
     if signal is not None and signal.is_cancelled():
         return await _error_result(tool_request, "Operation aborted", hooks)
+
+    missing = _missing_required(tool, tool_request.arguments)
+    if missing:
+        message = _missing_message(tool_request.name, missing)
+        return await _error_result(tool_request, message, hooks)
 
     if hooks.before_tool_call is not None:
         decision = await hooks.before_tool_call(tool_request)
@@ -73,6 +80,46 @@ async def execute_tool_call(
         tool_name=tool_request.name,
         content=result.content,
         is_error=False,
+    )
+
+
+def _missing_required(tool: Tool, arguments: dict[str, Any]) -> list[str]:
+    """The arguments the tool's own schema calls required, and this call lacks.
+
+    **Why this is here, in the core.** `required` is part of the `Tool` contract
+    this package defines, so checking it is mechanism, not policy — nothing here
+    knows what a path or a file is. Without it, a tool indexed the missing key
+    and the model was handed the KeyError's text: for `write_file`, the single
+    word `'path'`.
+
+    **The case it exists for is a reply cut off mid-call.** When the output limit
+    lands inside a tool call's arguments, the JSON is broken and every adapter
+    parses it to `{}` — never to a half-filled dict, because truncated JSON does
+    not parse at all. The loop still runs the call, because it follows content.
+    So the likeliest cause of a missing argument is the model's own oversized
+    reply — and the message says so, because the natural retry otherwise is the
+    same call again.
+
+    **Only `required`, not the whole schema.** Full JSON Schema validation, as Pi
+    does (`agent-loop.ts:617-618`, `validateToolArguments`, also before its
+    `beforeToolCall`), would need a validator, and a wrong *type* already fails
+    inside the tool with a message that names it. An absent argument is the
+    failure that produced no useful message at all.
+    """
+    required = tool.parameters.get("required")
+    if not isinstance(required, list):
+        return []
+    return [name for name in required if isinstance(name, str) and name not in arguments]
+
+
+def _missing_message(name: str, missing: list[str]) -> str:
+    listed = ", ".join(repr(argument) for argument in missing)
+    noun = "argument" if len(missing) == 1 else "arguments"
+    return (
+        f"{name} was called without its required {noun} {listed}, so it was not run. "
+        "The arguments arrived empty or incomplete - most often because the reply was "
+        "cut off at the output limit while writing them. Retry with a smaller call; "
+        "if the content was large, split it across several calls."
     )
 
 

@@ -20,10 +20,12 @@ The frames below are shaped from the event names Tau handles
 from __future__ import annotations
 
 import json
+import typing
 from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
+import pytest
 
 from omega_agent.tools import Tool
 from omega_agent.types import (
@@ -306,6 +308,64 @@ async def test_a_stream_that_just_stops_still_produces_an_ending() -> None:
 
     assert events[-1].type == "error"
     assert "without a terminal event" in events[-1].error.error_message
+
+
+def _incomplete(reason: str | None) -> bytes:
+    details = {} if reason is None else {"incomplete_details": {"reason": reason}}
+    return _frames(
+        {"type": "response.output_text.delta", "delta": "Here is"},
+        {"type": "response.incomplete", "response": details},
+    )
+
+
+@pytest.mark.parametrize(
+    ("reason", "said"),
+    [("content_filter", "content filter"), ("something_new", "'something_new'")],
+)
+async def test_an_incomplete_reply_that_did_not_hit_the_limit_is_an_error(
+    reason: str, said: str
+) -> None:
+    """**A content-filter stop was reported as `length`.** Every
+    `response.incomplete` became "hit the output limit", whatever its
+    `incomplete_details.reason` said. The Chat Completions adapter already ends a
+    content-filter stop as an error with the reply kept; this is the same event
+    from the other OpenAI wire format, so it gets the same ending. An unknown
+    reason is named rather than guessed, as there."""
+    async with _client(_incomplete(reason)) as client:
+        events = await _collect(_provider(client))
+
+    assert events[-1].type == "error"
+    assert said in events[-1].error.error_message
+    assert events[-1].error.content[0].text == "Here is", "the reply so far is kept"
+
+
+@pytest.mark.parametrize("reason", ["max_output_tokens", None])
+async def test_an_incomplete_reply_that_hit_the_limit_is_still_length(reason: str | None) -> None:
+    async with _client(_incomplete(reason)) as client:
+        events = await _collect(_provider(client))
+
+    assert events[-1].type == "done"
+    assert events[-1].reason == "length"
+
+
+def _declared(annotation: Any) -> set[str]:
+    """The string values of a `Literal[...] | None`, however it is nested."""
+    if typing.get_origin(annotation) is typing.Literal:
+        return {value for value in typing.get_args(annotation) if isinstance(value, str)}
+    return set().union(*(_declared(arg) for arg in typing.get_args(annotation)))
+
+
+def test_every_incomplete_reason_the_sdk_declares_is_mapped_on_purpose() -> None:
+    """The upgrade tripwire, as for the other two adapters. This adapter speaks
+    HTTP rather than using the SDK, but the SDK is installed and declares the
+    same field, so it is the list to check against."""
+    from openai.types.responses.response import IncompleteDetails
+
+    declared = _declared(IncompleteDetails.model_fields["reason"].annotation)
+
+    assert declared, "reason is a Literal; reading it found nothing"
+    known = set(openai_codex.INCOMPLETE_REASONS)
+    assert declared <= known, declared - known
 
 
 async def test_a_400_is_not_retried_and_a_429_is() -> None:

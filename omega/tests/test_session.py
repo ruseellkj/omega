@@ -380,7 +380,7 @@ async def test_no_store_means_no_files(tmp_path: Path) -> None:
     assert list(tmp_path.iterdir()) == []
 
 
-# ------------------------------------------------ where sessions live (Tier 2.5)
+# ------------------------------------ where sessions live (moved after Tier 2)
 
 
 def test_sessions_live_under_home_not_inside_the_project(tmp_path: Path) -> None:

@@ -145,7 +145,7 @@ def test_an_indented_secret_is_masked_and_keeps_its_indentation() -> None:
 
 # --------------------------------------------------- the paths that went around it
 #
-# Both of these were open until Tier 2.5, and both were found by *running* the
+# Both of these were open until after Tier 2 closed, and both were found by *running* the
 # thing rather than reading it. The lesson is in the test above:
 # `test_a_leaked_key_never_reaches_the_transcript` goes end to end through the
 # real harness, the real loop and the real hook — using a fake tool that
@@ -234,3 +234,60 @@ async def test_the_spilled_output_file_is_masked_on_disk() -> None:
     on_disk = Path(truncation.full_output_path).read_text(encoding="utf-8")
     assert secret not in on_disk, "the copy left behind on disk"
     assert "[redacted" in on_disk, "masked, not merely dropped by truncation"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "    max_tokens=4096,",
+        "DEFAULT_MAX_TOKENS = 4096",
+        "max_tokens: 4096",
+        "PASSWORD_MIN_LENGTH=8",
+        "TOKEN_TTL_SECONDS=3600",
+        "use_token = true",
+        "api_key = None",
+        'API_KEY=""',
+    ],
+)
+def test_a_setting_that_cannot_be_a_credential_is_left_alone(line: str) -> None:
+    """**Measured on omega's own source.** `DEFAULT_MAX_TOKENS = 4096`
+    (`omega_ai/anthropic.py`) came back as `DEFAULT_MAX_TOKENS = [redacted]`,
+    because the name contains TOKEN. The model reading that file sees a masked
+    number, and when it edits the file it can write `[redacted]` back — masking
+    that corrupts the code it was meant to protect. `found` must stay empty too:
+    it is what makes the UI say something was hidden.
+    """
+    assert redact(line) == (line, [])
+
+
+def test_an_all_digit_password_is_still_masked() -> None:
+    """The guard on the fix above: a number is left alone only when the *name*
+    says it is a quantity. A password made of digits is still a password."""
+    cleaned, found = redact("DB_PASSWORD=12345678")
+
+    assert "12345678" not in cleaned
+    assert found == ["secret-looking environment value"]
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        (
+            "ANTHROPIC_API_KEY=sk-ant-xyzxyzxyzxyzxyzxyz",
+            "ANTHROPIC_API_KEY=[redacted Anthropic API key]",
+        ),
+        (
+            'ANTHROPIC_API_KEY="sk-ant-xyzxyzxyzxyzxyzxyz"',
+            'ANTHROPIC_API_KEY="[redacted Anthropic API key]"',
+        ),
+    ],
+)
+def test_one_secret_on_an_env_line_gets_one_intact_label(line: str, expected: str) -> None:
+    """**Measured: `ANTHROPIC_API_KEY=[redacted] Anthropic API key]`.**
+
+    The specific rule labels the key first, then the catch-all `NAME=value` rule
+    reads the start of that label (`[redacted`, up to the space) as the value and
+    masks it again. Nothing leaked, but the label came out garbled, a quote was
+    eaten, and one secret was reported as two.
+    """
+    assert redact(line) == (expected, ["Anthropic API key"])

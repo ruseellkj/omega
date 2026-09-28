@@ -35,7 +35,6 @@ from omega_agent.hooks import AgentHooks
 from omega_agent.loop import DEFAULT_MAX_TURNS, run_agent_loop
 from omega_agent.provider import ModelProvider
 from omega_agent.session import SessionStore
-from omega_agent.session.tree import leaves
 from omega_agent.tools import Tool
 from omega_agent.types import AgentMessage, AssistantMessage, ToolResultMessage, UserMessage
 
@@ -247,13 +246,15 @@ class Harness:
             raise ValueError("Cannot resume without a session store.")
 
         self.session_id = session_id
+        # The next append must hang where that load ended. This used to be forced
+        # here with `branch_from(newest leaf)`, because a rewind with nothing
+        # asked after it lived only in the store's pointer and `load` could not
+        # see it. That kept memory and file together by undoing the rewind. A
+        # rewind is now a line in the file and `load` replays it, so the pointer
+        # and the file agree without help. The call is gone, not just
+        # unnecessary: `branch_from` now appends, and opening a session must not
+        # write to it.
         self.messages[:] = self.store.load(session_id)
-        # The next append must hang where that load ended, and `load` ends at the
-        # newest leaf. This store may still point wherever a rewind left it with
-        # nothing asked after, which saved the next answer to another branch than
-        # the one on screen. Same rule as `load`, so the two cannot drift apart.
-        ends = leaves(self.store.entries(session_id))
-        self.store.branch_from(session_id, ends[-1].id if ends else None)
         self._persisted = len(self.messages)
 
         # Deliberately 0, not len(). What is on disk was redacted on the way in

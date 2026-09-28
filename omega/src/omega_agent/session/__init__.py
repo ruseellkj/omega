@@ -8,6 +8,7 @@ between them.
 
 from omega_agent.session.entries import (
     SCHEMA_VERSION,
+    SessionBranch,
     SessionEntry,
     SessionHeader,
     SessionRecord,
@@ -24,6 +25,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "JsonlSessionStore",
     "SessionInfo",
+    "SessionBranch",
     "SessionEntry",
     "SessionHeader",
     "SessionRecord",

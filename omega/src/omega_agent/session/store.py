@@ -9,7 +9,7 @@ addition rather than surgery.
 
 Sessions land in `~/.omega/sessions/<project-key>/<id>.jsonl`.
 
-**That location changed at Tier 2.5, and the reason is worth recording.** Tier 2
+**That location changed after Tier 2 closed, and the reason is worth recording.** Tier 2
 put them in `<project>/.omega/sessions/`, beside the work they describe. That
 reads well and is wrong in practice, for three reasons all three references
 avoided:
@@ -43,9 +43,14 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Protocol
 
-from omega_agent.session.entries import SessionEntry, SessionHeader
+from omega_agent.session.entries import (
+    SessionBranch,
+    SessionEntry,
+    SessionHeader,
+    SessionRecord,
+)
 from omega_agent.session.jsonl import append_record, read_records
-from omega_agent.session.tree import CycleInTranscript, leaves, path_to
+from omega_agent.session.tree import path_to
 from omega_agent.types import AgentMessage
 
 
@@ -80,7 +85,7 @@ class SessionStore(Protocol):
         ...
 
     def branch_from(self, session_id: str, entry_id: str | None) -> None:
-        """Hang the next appended entry off `entry_id` rather than the tail."""
+        """Hang the next appended entry off `entry_id`, and record that it will."""
         ...
 
     def path(self, session_id: str) -> list[SessionEntry]:
@@ -108,6 +113,33 @@ _HASH_LENGTH = 6
 #: Longest slug before it is trimmed. The hash carries correctness, so the slug
 #: can be cut freely; this only stops absurd directory names.
 _SLUG_LENGTH = 48
+
+
+def _tip(records: list[SessionRecord]) -> str | None:
+    """Where the conversation currently ends. **The one rule**, replayed from the file.
+
+    Read the records in order. An entry sets the tip to its own id, because
+    `append` hangs every entry off the tip and the new entry becomes it. A
+    branch record sets it to its `parent_id`, because that is what a rewind is.
+    `None` is the start, before any entry.
+
+    **It used to be "the newest leaf in file order"**, and that could not see a
+    rewind with nothing asked after it: the rewind moved only a pointer in
+    memory, so a new process loaded the abandoned turns again. Replaying the file
+    sees it, because `branch_from` now writes the move down.
+
+    **For a file with no branch records the two rules agree**, which is every
+    session written before this one existed. The last entry in such a file is
+    always a leaf, since nothing written after it can claim it as a parent, and
+    it is the newest one. So those sessions load exactly as they did.
+    """
+    tip: str | None = None
+    for record in records:
+        if isinstance(record, SessionEntry):
+            tip = record.id
+        elif isinstance(record, SessionBranch):
+            tip = record.parent_id
+    return tip
 
 
 def project_key(project_root: Path) -> str:
@@ -143,9 +175,12 @@ class JsonlSessionStore:
         base = (home if home is not None else Path.home()) / ".omega" / "sessions"
         self.directory = base / project_key(Path(project_root))
 
-        #: The id of the last entry written per session, so the next one can point
-        #: at it. Populated lazily on append, because a resumed session was
-        #: written by a different process and this store has never seen its tail.
+        #: Where each session's conversation ends, which is where the next entry
+        #: will hang. **A cache of `_tip`**, not a second source of truth: every
+        #: move of it is also written to the file (`append`, `branch_from`), so
+        #: the two agree. Filled lazily, because a resumed session was written by
+        #: another process and this store has never seen it, and refreshed by
+        #: `load`, which has just replayed the file anyway.
         self._last_entry: dict[str, str | None] = {}
 
     def path_for(self, session_id: str) -> Path:
@@ -200,24 +235,27 @@ class JsonlSessionStore:
         why it survived a tier. Once one parent has two children, file order
         returns both attempts concatenated — a conversation that never happened.
 
-        `branch` names the leaf to load. Omitted, it takes the **last** leaf,
-        which for a linear file is the only one and for a branched file is the
-        most recently written — "carry on where I left off".
+        `branch` names the leaf to load. Omitted, it takes **where the
+        conversation currently ends** (`_tip`): the newest entry, or wherever a
+        later rewind moved it — "carry on where I left off". That is empty after
+        a rewind to the very start, which is the right answer and not a missing
+        session.
+
+        Omitted, it also **refreshes the store's pointer** to that tip. A load is
+        what a resume shows, so the next append has to continue it, including
+        when another process appended to this session after this store last
+        looked. It is a cache being set to what the file says, so nothing is
+        written. A cycle is still refused, by `path_to`, rather than looped.
         """
-        entries = self.entries(session_id)
-        if not entries:
-            return []
+        if branch is not None:
+            return [entry.message for entry in path_to(self.entries(session_id), branch)]
 
-        tip = branch
+        records = read_records(self.path_for(session_id))
+        tip = _tip(records)
+        self._last_entry[session_id] = tip
         if tip is None:
-            ends = leaves(entries)
-            if not ends:
-                # Only reachable if every entry is claimed as a parent, which
-                # means a cycle. `path_to` reports it properly; guessing a tip
-                # here would hide it.
-                raise CycleInTranscript(f"session {session_id!r} has no leaf entry")
-            tip = ends[-1].id
-
+            return []
+        entries = [record for record in records if isinstance(record, SessionEntry)]
         return [entry.message for entry in path_to(entries, tip)]
 
     def latest_session_id(self) -> str | None:
@@ -234,8 +272,8 @@ class JsonlSessionStore:
         """Every saved session for this project, newest first.
 
         **This reads every file**, which is the honest cost of having no index.
-        Pi and Tau both keep an `index.jsonl` precisely so listing does not mean
-        parsing transcripts; omega does not, because one `--sessions` command run
+        Tau keeps an `index.jsonl` so listing does not mean parsing transcripts (Pi,
+        like this, reads every file). omega has none, because one `--sessions` command run
         occasionally is not the same pressure as a live session picker. If a TUI
         arrives at Tier 3 and this gets called on every keystroke, the index is
         the fix — and it is an addition, not a format change.
@@ -270,15 +308,22 @@ class JsonlSessionStore:
     def branch_from(self, session_id: str, entry_id: str | None) -> None:
         """Hang the next appended entry off `entry_id` instead of the tail.
 
-        The **whole write side of branching**, and it is one line of state —
-        which is what `parent_id` shipping in Tier 2 bought. Nothing is deleted
-        and nothing is rewritten: the abandoned entries stay exactly where they
-        are, and the file stays append-only, which is the property that makes a
-        crash mid-turn survivable.
+        The **whole write side of branching**: one line of state, which is what
+        `parent_id` shipping in Tier 2 bought, and **one line of file**. Nothing
+        is deleted and nothing is rewritten: the abandoned entries stay exactly
+        where they are, and the file stays append-only, which is the property
+        that makes a crash mid-turn survivable.
+
+        **The line is what makes a rewind outlive the process.** This used to
+        move only the in-memory pointer. Rewind, then quit before asking
+        anything, and nothing on disk said the rewind had happened: the next
+        `--resume` loaded the abandoned turns again. The `SessionBranch` record
+        says it, and `_tip` reads it.
 
         `None` branches from the root, i.e. starts the conversation over while
         keeping the old one readable.
         """
+        append_record(self.path_for(session_id), SessionBranch(parent_id=entry_id))
         self._last_entry[session_id] = entry_id
 
     def path(self, session_id: str) -> list[SessionEntry]:
@@ -290,9 +335,10 @@ class JsonlSessionStore:
         position in it. Cutting that list by index is how a second rewind put an
         abandoned branch back on disk.
 
-        Differs from `load()` only between a `branch_from` and the next append.
-        `load()` still returns the newest leaf, and this returns where the next
-        entry will hang, which is the conversation a rewind just produced.
+        The same conversation `load()` returns, as entries rather than messages,
+        because a cut needs ids. They used to differ between a `branch_from` and
+        the next append, when `load()` still read the newest leaf. Now both end at
+        `_tip`, since the rewind is written down.
         """
         tip = self._parent_for(session_id)
         return [] if tip is None else path_to(self.entries(session_id), tip)
@@ -301,10 +347,9 @@ class JsonlSessionStore:
         if session_id in self._last_entry:
             return self._last_entry[session_id]
 
-        # Never seen this session: read its tail to find where to hang the next
-        # entry. Happens exactly once per resumed session.
-        records = read_records(self.path_for(session_id))
-        entries = [r for r in records if isinstance(r, SessionEntry)]
-        last = entries[-1].id if entries else None
-        self._last_entry[session_id] = last
-        return last
+        # Never seen this session: replay its file to find where to hang the
+        # next entry. The same rule `load` uses, so a session resumed by another
+        # process continues what it loaded. Happens once per session.
+        tip = _tip(read_records(self.path_for(session_id)))
+        self._last_entry[session_id] = tip
+        return tip

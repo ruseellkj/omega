@@ -52,7 +52,7 @@ async def test_write_file_creates_parent_directories(tmp_path: Path) -> None:
 
 
 async def test_the_tools_no_longer_refuse_paths_outside_the_root(tmp_path: Path) -> None:
-    """Tier 2.5: the fence came out of the tools.
+    """After Tier 2: the fence came out of the tools.
 
     This test asserted the opposite at Tier 2, and the reversal is the whole
     change. It is **not** a weakening on its own: `test_approval.py` now proves
@@ -320,3 +320,41 @@ def test_every_tool_says_something_about_paths_or_scope(tmp_path: Path) -> None:
     assert "not restricted" in by_name["run_shell"].description, (
         "the shell's lack of confinement is the one thing it must admit"
     )
+
+
+async def test_a_call_whose_arguments_were_cut_off_says_so(tmp_path: Path) -> None:
+    """**Measured: the model was told only `'path'`.**
+
+    A reply cut off at the output limit while writing a tool call's arguments
+    arrives as broken JSON, which the adapter parses to `{}`
+    (`omega_ai/anthropic.py`, the malformed-arguments branch). `write_file` then
+    indexed `arguments["path"]`, the KeyError's text became the result, and the
+    model read one quoted word. It could not tell that its own reply was cut, so
+    the natural retry was the same oversized call.
+
+    Checked before the gate on purpose: a prompt asking the user to approve a
+    write that names no file is a question with no right answer.
+    """
+    from omega_agent.hooks import ALLOW, AgentHooks, ToolCallDecision
+    from omega_agent.tool_runner import execute_tool_call
+    from omega_agent.types import ToolCall
+
+    asked: list[str] = []
+
+    async def gate(call: ToolCall) -> ToolCallDecision:
+        asked.append(call.name)
+        return ALLOW
+
+    tools = {tool.name: tool for tool in build_tools(tmp_path)}
+    message = await execute_tool_call(
+        ToolCall(id="1", name="write_file", arguments={}),
+        tools,
+        AgentHooks(before_tool_call=gate),
+        None,
+    )
+
+    assert message.is_error
+    assert "'path'" in message.text and "'content'" in message.text, message.text
+    assert "cut off" in message.text, message.text
+    assert asked == [], "nobody should be asked to approve a write that names no file"
+    assert list(tmp_path.iterdir()) == []

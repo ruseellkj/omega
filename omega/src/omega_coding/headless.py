@@ -44,8 +44,26 @@ class HeadlessResult:
 
     @property
     def ok(self) -> bool:
-        """`stop` is the only success. The other three all mean unfinished."""
-        return self.reason == "stop"
+        """`stop` is the only success. The other three all mean unfinished.
+
+        And `stop` with a cut-off final answer is not one either: the loop stops
+        on content, so a reply the provider cut at its length limit ends the run
+        as `stop` (see `status.CUT_OFF`). The evals and the sub-agent tool read
+        this property, and both took half an answer for a finished one.
+        """
+        return self.reason == "stop" and not self.cut_off
+
+    @property
+    def cut_off(self) -> bool:
+        """Did the last reply end at the provider's length limit?
+
+        The last one only. A cut-off turn that asked for a tool is followed by
+        more turns, and the run may still finish properly.
+        """
+        for message in reversed(self.messages):
+            if isinstance(message, AssistantMessage):
+                return message.stop_reason == "length"
+        return False
 
     @property
     def text(self) -> str:

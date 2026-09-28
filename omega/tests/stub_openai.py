@@ -52,11 +52,12 @@ def _fragment(index: int, *, call_id: str | None = None, name: str | None = None
     )
 
 
-def _text_path() -> list[Any]:
+def _text_path(stop_reason: str | None = "stop") -> list[Any]:
+    """Says "hi". `stop_reason` is the `finish_reason` it ends with."""
     return [
         _chunk(content="h"),
         _chunk(content="i"),
-        _chunk(finish_reason="stop"),
+        _chunk(finish_reason=stop_reason),
         _usage_only_chunk(),
     ]
 
@@ -129,7 +130,7 @@ class _Completions:
             # is still safe.
             raise client.error()
 
-        events = _tool_path() if client.script == "tool" else _text_path()
+        events = _tool_path() if client.script == "tool" else _text_path(client.stop_reason)
         stream = _Stream(events, fail_after=client.fail_midstream_after, error=client.error)
         # Kept so a test can assert the adapter closed what it was handed.
         client.last_stream = stream
@@ -149,8 +150,12 @@ class StubClient:
         fail_midstream_after: int | None = None,
         error: Callable[[], Exception] = lambda: ConnectionError("stub"),
         script: str = "text",
+        stop_reason: str | None = "stop",
     ) -> None:
         self.script = script
+        #: Named as in `stub_anthropic` so one suite can drive both; here it is
+        #: the `finish_reason` the text stream ends with.
+        self.stop_reason = stop_reason
         self.fail_times = fail_times
         self.fail_midstream_after = fail_midstream_after
         self.error = error

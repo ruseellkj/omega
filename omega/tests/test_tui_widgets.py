@@ -474,22 +474,37 @@ async def test_a_loaded_session_is_masked_before_it_is_drawn(tmp_path: Path, way
 
 
 async def test_resume_of_the_session_you_are_in_redraws_when_it_changes(tmp_path: Path) -> None:
-    """A rewind nothing followed is not saved, so `/resume` of the same session
-    brings the dropped question back, as a fresh `--resume` would. The session
-    id does not change, so a redraw keyed on the id alone left the screen short
-    of the conversation."""
+    """`/resume` of the session you are in can load more than is on screen. The
+    session id does not change, so a redraw keyed on the id alone left the
+    screen short of the conversation.
+
+    **The route here changed, and the property did not.** It used to be a rewind
+    nothing followed: that was not saved, so `/resume` brought the dropped
+    question back. A rewind is a line in the file now and resuming keeps it, so
+    that route changes nothing. Another process continuing the same session
+    still does, which is two omega windows on one conversation."""
     app = _app_with_commands(tmp_path)
     async with app.run_test() as pilot:
         await _ask(pilot, app, "first")
-        await _ask(pilot, app, "second")
-        await app._run_command("/rewind")
-        await pilot.pause()
+        session = app.harness.session_id
+        assert session is not None
+
+        elsewhere = Harness(
+            provider=FakeProvider([text_turn("ok")]),
+            model="m",
+            system="s",
+            tools=[],
+            store=JsonlSessionStore(tmp_path, home=tmp_path),
+        )
+        elsewhere.resume(session)
+        async for _ in elsewhere.run("second, from another window"):
+            pass
         assert _user_rows_on_screen(app) == ["❯ first"]
 
-        await app._run_command(f"/resume {app.harness.session_id}")
+        await app._run_command(f"/resume {session}")
         await pilot.pause()
 
-        assert _user_rows_on_screen(app) == ["❯ first", "❯ second"]
+        assert _user_rows_on_screen(app) == ["❯ first", "❯ second, from another window"]
 
 
 async def test_rewind_after_compact_shows_the_conversation_it_continues(tmp_path: Path) -> None:

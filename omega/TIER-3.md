@@ -197,7 +197,8 @@ three seconds against no network. It is an addition on top of this, in the same
 seam.
 
 **Fuzzing found a real gap that reading did not.** 3,000 random transcripts
-produced zero invariant violations but left 279 over budget, and all of them had
+produced zero invariant violations but left 279 over budget (`compact.py`, written in the same
+commit, says 257; the fuzz script was not kept, so the count cannot be re-run), and all of them had
 the same shape: no tool results to cut, so the first version could do nothing.
 Adding the prose pass took that to 93, and every one of those remaining is one of
 two deliberate refusals — the user's own words exceeding the budget (74), or the
@@ -354,7 +355,7 @@ listed below as decisions, not omissions.
 `queue_steering` as wired, tested, and unreachable by a human, because a
 `print`/`input` REPL cannot take a keystroke while a turn is running. That is now
 closed — type into the box mid-turn and the guidance is queued, acknowledged on
-screen, and drained by the loop after the current tool result. A prettier
+screen, and drained by the loop once the current reply's tool calls have all run. A prettier
 transcript would not have justified the dependency; a gap closing does.
 
 ```
@@ -443,6 +444,16 @@ append-only bought, and why rewinding a log you cannot edit is possible at all.
 Rewound 1 question(s): 4 messages dropped.
 The old branch is still in the session file - /sessions still lists it.
 ```
+
+**2026-09-28: the format was not quite right from the start.** It could not
+record where the conversation ends. `branch_from` moved only an in-memory
+pointer, so if you rewound and then quit before asking anything, the next
+`--resume` loaded the abandoned turns again. A rewind now also appends a
+`SessionBranch` record (`entries.py`), and `load` replays entries and branch
+records in file order to find where the conversation ends. That is a new record
+kind, so the claim above holds only in a narrower form: no existing shape
+changed, and there is still no `SCHEMA_VERSION` bump. An older omega skips the
+new line, and continues from the newest leaf as it always did.
 
 **Not built:** a branch *picker*. `load(branch=...)` takes a leaf id and
 `leaves()` lists them, so the mechanism is complete, but choosing between two
@@ -665,6 +676,10 @@ new turn over an intact conversation, not a rewind.
 |---|---|
 | Anthropic | **yes** — input arrives in `message_start`, output accumulates in `message_delta`, so the partial already carries it |
 | OpenAI | **no** — usage is only ever sent in a final usage-only chunk *after* generation ends (`openai.py:438-453`), and the cancel returns at `:436` before that chunk exists |
+
+*Corrected 2026-09-28:* re-measured with the offline stubs, an Anthropic turn cancelled after
+`message_start` records its input tokens (11 in, 0 out), because the partial carries them; only the
+OpenAI turn is 0/0.
 
 omega already asks for it: `stream_options: {"include_usage": True}` is set at `openai.py:388`. The
 number is not missing because nobody requested it; it was never sent.

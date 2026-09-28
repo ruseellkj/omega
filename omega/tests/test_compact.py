@@ -249,6 +249,45 @@ async def test_two_compactors_agree() -> None:
     assert await _compactor()(messages) == await _compactor()(messages)
 
 
+async def test_consecutive_compacted_requests_share_their_prefix() -> None:
+    """**Purity was not enough for caching. Measured before the fix.**
+
+    Every function here is pure, so one turn's iterations agree. Consecutive
+    *turns* did not. Each new turn dropped exactly enough of the oldest units to
+    fit, so the cut moved every turn, and the note naming how many turns were
+    removed changed with it. With a 4,000 window and ~4,200-character results,
+    the requests for turns 10 and 11 shared only their first message. Anthropic
+    then writes nearly the whole request to the cache again each turn, at 1.25x
+    the price of plain input, so a compacted turn's messages cost about 125%
+    of sending them uncached.
+
+    **Now the cut moves in steps.** The drop is rounded up to a whole number of
+    steps, and a unit that is already old never changes, so the cut stays where
+    it is for several turns and each request is the previous one plus the new
+    turn. It only moves when the step advances, which is what the `else` checks.
+    """
+    compactor = _compactor()
+    transcript: list[AgentMessage] = [UserMessage(content="port the parser to the new API")]
+    requests: list[list[AgentMessage]] = []
+    turn = 0
+    while len(requests) < 6:
+        transcript.extend(_turn_with_tool(f"call-{turn}", f"file {turn}: " + "x" * 500))
+        turn += 1
+        sent = await compactor(transcript)
+        if len(sent) < len(transcript):  # compaction has begun
+            requests.append(sent)
+
+    shared = 0
+    for before, after in zip(requests, requests[1:], strict=False):
+        head = [m.model_dump_json() for m in after[: len(before)]]
+        if head == [m.model_dump_json() for m in before]:
+            shared += 1
+        else:
+            assert before[1] != after[1], "the prefix broke although the cut did not move"
+
+    assert shared >= 4, f"only {shared} of 5 consecutive requests extend the one before"
+
+
 # ------------------------------------------ conversations with nothing to shrink
 
 

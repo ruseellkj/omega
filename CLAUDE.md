@@ -10,7 +10,7 @@ shipping — he reads every line himself.
 
 | Directory | What it is |
 |---|---|
-| `omega/` | **the agent.** Three packages, 15,179 lines of `src/`, 770 tests. Tier 3 complete. |
+| `omega/` | **the agent.** Three packages, 15,830 lines of `src/`, 821 tests. Tier 3 complete. |
 | `dev-notes/` | the study notes — teardowns of the references, architecture decisions, concepts |
 | `research/pi/` | **reference 1**: Pi (TypeScript), `github.com/earendil-works/pi` |
 | `research/tau/` | **reference 2**: Tau (Python), `github.com/huggingface/tau` — a port of Pi |
@@ -25,7 +25,7 @@ references do this?" — never edit them.
 ```bash
 cd omega
 uv sync                             # install from the lockfile
-uv run pytest -q                    # 770 tests, ~55s, fully offline
+uv run pytest -q                    # 821 tests, ~55s, fully offline
 uv run mypy --strict src            # must be clean
 uv run ruff check .                 # must be clean
 uv run python -m omega_coding.evals # smoke eval, 4/4, no network
@@ -154,8 +154,9 @@ invented to fill a table is not.
 ## Current state
 
 **Tier 3 complete** — every row of `omega/TIER-3.md` filled. Compaction (`compact.py`, on
-`transform_context`) and prompt caching (`cache_control` in `omega_ai/anthropic.py`) closed the last
-two of the nine beginner failures. Redaction moved to `before_record`, so it masks every message
+`transform_context`) closed beginner failure #1; prompt caching (`cache_control` in
+`omega_ai/anthropic.py`) is built and tested, but no Anthropic cache hit has been observed yet, so
+the scorecard reads 8 of 9. Redaction moved to `before_record`, so it masks every message
 rather than only tool output, which closes the hook-shape gap Tier 2 recorded.
 
 Since then, product work — recorded in `omega/PRODUCT-BACKLOG.md`, not on the tier scorecard:

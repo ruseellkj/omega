@@ -9,8 +9,16 @@ them later at the right moments.
 
 Every one of these is a *decision* — may I run this? what should be sent? — and
 decisions belong to the caller. The mechanism (ask model, run tools, repeat) is
-all that stays in the loop. Pi's 880-line compaction subsystem plugs into
-exactly one of these callbacks, and its loop contains zero lines of compaction.
+all that stays in the loop. omega's compaction plugs into one of these
+callbacks, `transform_context`, and the loop contains zero lines of it.
+
+Pi's loop contains zero lines of compaction too, **by a different route**. This
+paragraph used to say Pi's compaction plugs into `transformContext`; it does not.
+Pi runs it between runs — `agent/src/harness/agent-harness.ts:783-785`, whose
+`compact()` refuses unless the harness is idle, and in the coding agent
+`agent-session.ts:1096` after a run and `:1201` before the next prompt — while
+its `transformContext` carries extension `context` handlers (`agent-harness.ts:493`,
+`sdk.ts:350-354`). Same property, different seam.
 
 Pi has nine hooks and Tau six. Tier 2 fills these:
 

@@ -14,7 +14,9 @@ The four promises, from boundaries-and-layout.md:97-104:
 1. exactly one `start`, exactly one ending
 2. errors arrive as `error` **events**, never as raised exceptions
 3. retries happen below this line and are invisible above it
-4. vendor stop reasons are normalised to `stop` / `length` / `toolUse`
+4. vendor stop reasons are normalised to `stop` / `length` / `toolUse`, and an
+   ending that is none of them arrives as an `error` (each adapter's own values
+   are pinned in its translation tests, since the vendors do not share them)
 """
 
 from __future__ import annotations

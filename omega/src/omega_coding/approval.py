@@ -1,4 +1,4 @@
-"""The approval gate — the whole of failure #4's *destruction* half since Tier 2.5.
+"""The approval gate — the whole of failure #4's *destruction* half since the fence came out.
 
 At Tier 2 this file shared the job with a fence in `paths.py`: confinement bounded
 *where* the file tools could go, and the gate covered the shell, which no amount
@@ -44,6 +44,11 @@ much too coarse for "you may leave it". It will still surprise someone who
 expects one keystroke to mean one thing, which is why `ApprovalRequest` carries
 a `scope_note` saying which grant is on offer.
 
+**Three things inside the root are outside the inside-root grant:** `OMEGA.md`,
+the project `.env` and anything under `.git/`, because writing them changes what
+happens in later sessions and on later git commands. `_steers_later` says why the
+list stops there.
+
 **It fills `before_tool_call`, which means the loop gains nothing from it.** A
 whole policy subsystem — a deny list, a prompt, per-session memory — plugs in
 through one callback. That is Boundary B doing the job it was drawn for in
@@ -84,10 +89,19 @@ class ApprovalRequest:
     summary: str
     arguments: dict[str, Any]
     outside_root: Path | None = None
+    #: This file is asked about every time, whatever "always" was said to — see
+    #: `_steers_later`. Carried so the prompt does not offer a grant it will
+    #: not honour.
+    asked_every_time: bool = False
 
     @property
     def scope_note(self) -> str:
         """What "always" would grant here, in words, for whoever draws the prompt."""
+        if self.asked_every_time:
+            return (
+                f"always = every future {self.tool_name} call this session, except this "
+                "file, which is asked about every time"
+            )
         if self.outside_root is None:
             return f"always = every future {self.tool_name} call this session"
         return f"always = files directly in {self.outside_root} this session"
@@ -108,6 +122,11 @@ _PATH_ARGUMENTS: dict[str, str] = {
     "read_file": "path",
     "write_file": "path",
     "edit_file": "path",
+    # Missing until a tripwire test compared this table with the tools' own
+    # schemas (`test_every_tool_that_takes_a_path_is_in_the_gates_path_table`).
+    # Without it an outside image was asked about as if it were inside, and
+    # "always" covered every image on the disk rather than one folder.
+    "read_image": "path",
     # The search tools all name their directory `path`, deliberately: the gate
     # reads this table to find out where a call reaches, and a tool that spelled
     # it `dir` would lose its outside-root check in silence.
@@ -115,6 +134,47 @@ _PATH_ARGUMENTS: dict[str, str] = {
     "find_files": "path",
     "search_files": "path",
 }
+
+#: The tools whose "always" inside the root skips `_steers_later` files.
+_WRITES = frozenset({"write_file", "edit_file"})
+
+
+def _steers_later(resolved: Path, root: Path) -> bool:
+    """Does writing this file change what happens *after* this conversation?
+
+    These do, and they are asked about every time even after "always" — the
+    grant was given for editing a project, not for rewriting how omega or git
+    will behave next time. The first two are every project file omega itself
+    reads at startup:
+
+    * **`OMEGA.md` at the root.** Read into the system prompt at startup
+      (`system_prompt.py`, `PROJECT_INSTRUCTIONS_FILE`), so a write there
+      becomes omega's own instructions in every later session. Only the root one
+      is read, so only the root one is listed.
+    * **`.env` at the root.** Loaded at startup (`env.py`, `find_env_files`,
+      nearest first), so a write there changes omega's configuration — which
+      key, which endpoint — in every later session. Parent `.env` files are
+      loaded too, but they are outside the root and asked about already.
+    * **Anything under `.git/`.** Its config and hooks decide what git does on
+      the user's next git command, long after this session.
+
+    Compared case-insensitively, because the default macOS filesystem is:
+    `omega.md` and `OMEGA.md` are one file there.
+
+    **This list is not complete, and cannot be.** A build script, a package's
+    scripts, a shell profile inside the project — plenty of files run later.
+    They are left to the ordinary grant on purpose: they only run when someone
+    invokes them, and a list that tried to name them all would ask about half of
+    every project and train the user to say yes. Real containment is a sandbox
+    behind `prepare_shell`, not a longer list. The shell is not covered either:
+    it is gated as a whole, because the gate cannot tell which files a command
+    writes (see `_PATH_ARGUMENTS`).
+    """
+    try:
+        parts = [part.lower() for part in resolved.relative_to(root).parts]
+    except ValueError:
+        return False
+    return parts in (["omega.md"], [".env"]) or (bool(parts) and parts[0] == ".git")
 
 
 def _deletes_a_root(command: str) -> bool:
@@ -290,6 +350,19 @@ class ApprovalPolicy:
         """
         return outside.parent in self._always_dirs
 
+    def _steers_later(self, call: ToolCall) -> bool:
+        """Is this an inside-root write to a file "always" does not cover?"""
+        if call.name not in _WRITES:
+            return False
+        raw = call.arguments.get(_PATH_ARGUMENTS[call.name])
+        if not isinstance(raw, str):
+            return False
+        try:
+            resolved = resolve_path(raw, self._root)
+        except Exception:  # noqa: BLE001 - unresolvable is the tool's error to raise
+            return False
+        return _steers_later(resolved, self._root)
+
     async def __call__(self, call: ToolCall) -> ToolCallDecision:
         # First, above everything. Neither --yes nor always-allow can reach past
         # this, which is the property that makes the deny list worth having.
@@ -326,8 +399,9 @@ class ApprovalPolicy:
         if self._auto_approve:
             return ALLOW
 
+        steers_later = outside is None and self._steers_later(call)
         if outside is None:
-            if call.name in self._always:
+            if call.name in self._always and not steers_later:
                 return ALLOW
         elif self._already_granted(outside):
             return ALLOW
@@ -349,6 +423,7 @@ class ApprovalPolicy:
                 summary=_summarise(call, outside),
                 arguments=dict(call.arguments),
                 outside_root=outside.parent if outside is not None else None,
+                asked_every_time=steers_later,
             )
         )
 

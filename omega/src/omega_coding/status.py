@@ -67,6 +67,19 @@ _TARGET_WIDTH = 40
 WAITING = "working"
 
 
+#: The line under a reply the provider cut off at its length limit, on every
+#: screen: the TUI (live and replayed), the REPL, and `-p`. Kept here beside
+#: `describe` for the same reason — one wording, or a resumed screen and a live
+#: one disagree.
+#:
+#: **Why a notice is needed at all.** The loop stops on content, not on the stop
+#: reason, so a cut-off reply with no tool call ends the run as `stop`, exactly
+#: like a finished one. Only the stored message says `length`. A notice driven
+#: by `agent_end` could never fire, which is why every screen reads
+#: `message_end` for this one — and why the loop and its end reasons are not
+#: where it was fixed.
+CUT_OFF = "cut off: the reply reached the length limit, so it is incomplete"
+
 def _clip(text: str, width: int = _TARGET_WIDTH) -> str:
     collapsed = " ".join(text.split())
     return collapsed if len(collapsed) <= width else collapsed[: width - 1] + "…"

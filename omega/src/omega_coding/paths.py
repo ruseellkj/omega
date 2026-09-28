@@ -1,6 +1,6 @@
 """Path resolution — and, optionally, confinement.
 
-**This file changed shape at Tier 2.5, and the change is worth understanding
+**This file changed shape after Tier 2 closed, and the change is worth understanding
 before reading the code.**
 
 At Tier 2 this was a *fence*: every file tool refused any path outside the launch
@@ -27,18 +27,18 @@ reference: silent, unprompted, unlogged access to the entire disk.
 
 **The resolution logic below is unchanged, and is still the interesting part.**
 Knowing *whether* a path is outside the root is the same problem as refusing it
-was, and three plausible implementations are wrong:
+was, and two plausible implementations are wrong (a third was listed here too):
 
 1. **`str.startswith`** — `/repo-evil` starts with `/repo`.
 2. **Comparing before resolving** — `project/../../etc/passwd` is inside
    `project` until you normalise it.
-3. **`Path.resolve()` on the whole path** — it cannot follow a symlink it never
-   reaches. `project/link/new.txt`, where `link` points outside and `new.txt`
-   does not exist yet, resolves without ever traversing `link`. Since
-   `write_file` exists precisely to create files that are not there, this is the
-   common case, not the exotic one.
+3. **`Path.resolve()` on the whole path** — *not wrong; corrected 2026-09-28.*
+   Measured on Python 3.14: `project/link/new.txt`, where `link` points outside
+   and `new.txt` does not exist yet, resolves through `link` to `outside/new.txt`.
+   Non-strict `resolve()` follows every link that exists. The walk below does
+   the same job by hand; it is kept, but correctness does not depend on it.
 
-The third is why this file is longer than a one-liner. It matters *more* now, not
+Judging inside from outside matters *more* now than under the fence, not
 less: a path misjudged as inside the root is a prompt the user never sees.
 """
 
@@ -71,8 +71,9 @@ def resolve_path(candidate: str | Path, root: Path) -> Path:
     """Resolve `candidate` against `root` and return it, wherever it lands.
 
     The default. Relative paths are taken as relative to `root`; absolute paths
-    are honoured. Nothing is refused for being outside — that is the gate's call
-    now, and it needs the resolved path in order to make it.
+    are honoured, and so is a leading `~`. Nothing is refused for being outside —
+    that is the gate's call now, and it needs the resolved path in order to make
+    it.
 
     The returned path is fully resolved, which makes it the right key for
     `FileLocks` as well: two names for one file must share one lock.
@@ -85,7 +86,16 @@ def resolve_path(candidate: str | Path, root: Path) -> Path:
     if "\x00" in str(candidate):
         raise UnusablePath(f"Refused: {candidate!r} contains a null byte.")
 
-    raw = Path(candidate)
+    # `~` first. pathlib expands nothing unless asked, so `~/Downloads/a.txt`
+    # was a relative path under a folder literally named `~` — inside the
+    # project, where the gate waved the read through and a write would have
+    # made that folder. Nobody means that; the shell has taught everyone `~` is
+    # home. `expanduser` raises RuntimeError when no home can be found, which is
+    # an unusable path like any other.
+    try:
+        raw = Path(candidate).expanduser()
+    except RuntimeError as exc:
+        raise UnusablePath(f"Refused: {candidate!r} is not a usable path ({exc}).") from exc
     target = raw if raw.is_absolute() else resolved_root / raw
 
     try:

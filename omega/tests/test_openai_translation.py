@@ -12,6 +12,14 @@ the neutral `ToolResultMessage` above them never had to pick a side.
 
 from __future__ import annotations
 
+import typing
+from typing import Any
+
+import pytest
+from openai.types.chat.chat_completion_chunk import Choice
+
+import omega_ai.openai as adapter
+import stub_openai
 from omega_agent.tools import Tool
 from omega_agent.types import (
     AgentMessage,
@@ -24,10 +32,12 @@ from omega_agent.types import (
 )
 from omega_ai.anthropic import to_anthropic_messages
 from omega_ai.openai import (
+    OpenAIProvider,
     normalise_finish_reason,
     to_openai_messages,
     to_openai_tools,
 )
+from omega_ai.retry import RetryPolicy
 
 
 def _tool() -> Tool:
@@ -231,7 +241,77 @@ def test_content_wins_over_the_reported_reason() -> None:
     assert normalise_finish_reason("stop", has_tool_calls=True) == "toolUse"
 
 
-def test_an_unknown_reason_falls_back_to_stop() -> None:
-    """`content_filter`, or something invented next year. Never crash on it."""
-    assert normalise_finish_reason("content_filter", has_tool_calls=False) == "stop"
+def test_a_filtered_or_unknown_reason_is_not_a_clean_finish() -> None:
+    """**This test used to assert the bug.** It was called
+    `test_an_unknown_reason_falls_back_to_stop` and pinned `content_filter` to
+    `stop`: a reply the provider's filter cut off read as a finished answer. Never
+    crashing on an unknown value is still right; calling it a finish was not. A
+    missing reason is still a finish, since some servers send none."""
+    for raw in ("content_filter", "a_reason_from_next_year"):
+        ending = normalise_finish_reason(raw, has_tool_calls=False)
+        assert isinstance(ending, adapter.AbnormalStop), f"{raw!r} read as {ending!r}"
     assert normalise_finish_reason(None, has_tool_calls=False) == "stop"
+
+
+def _declared(annotation: Any) -> set[str]:
+    """The string values of a `Literal[...] | None`, however it is nested."""
+    if typing.get_origin(annotation) is typing.Literal:
+        return {value for value in typing.get_args(annotation) if isinstance(value, str)}
+    return set().union(*(_declared(arg) for arg in typing.get_args(annotation)))
+
+
+def test_every_finish_reason_the_sdk_declares_is_mapped_on_purpose() -> None:
+    """**The upgrade tripwire**, as for Anthropic. The chunk's `finish_reason`
+    is `Literal[...] | None`, so the `Literal` is unwrapped before reading it."""
+    declared = _declared(Choice.model_fields["finish_reason"].annotation)
+
+    assert declared, "finish_reason is a Literal; reading it found nothing"
+    assert declared <= set(adapter.FINISH_REASONS), declared - set(adapter.FINISH_REASONS)
+
+
+async def _ending(stop_reason: str | None) -> Any:
+    client = stub_openai.StubClient(stop_reason=stop_reason)
+    provider = OpenAIProvider(client=client, retry=RetryPolicy(attempts=1))  # type: ignore[arg-type]
+    events = [
+        event
+        async for event in provider.stream_response(
+            model="m", system="s", messages=[UserMessage(content="hi")], tools=[]
+        )
+    ]
+    assert [e.type for e in events].count("start") == 1
+    assert len([e for e in events if e.type in {"done", "error"}]) == 1, "one ending"
+    return events[-1]
+
+
+@pytest.mark.parametrize(
+    ("raw", "said"),
+    [
+        ("content_filter", "content filter"),
+        ("a_reason_from_next_year", "a_reason_from_next_year"),
+    ],
+)
+async def test_an_abnormal_finish_is_an_error_that_keeps_the_reply(raw: str, said: str) -> None:
+    """**Measured before the fix:** both came back as `done` with `stop`. The
+    stream now ends as every other failure does, with an `error` that still
+    holds the text that arrived and says what happened.
+
+    The cost is deliberate. An OpenAI-compatible server that sends a value the
+    SDK does not declare now shows an error after its answer instead of passing
+    silently. Visible beats silent: the answer is still there to read."""
+    ending = await _ending(raw)
+
+    assert ending.type == "error"
+    assert ending.error.stop_reason == "error"
+    assert said in (ending.error.error_message or "")
+    assert ending.error.text == "hi", "the reply so far is kept"
+
+
+@pytest.mark.parametrize(
+    ("raw", "reason"),
+    [("stop", "stop"), (None, "stop"), ("length", "length"), ("function_call", "toolUse")],
+)
+async def test_a_normal_finish_is_still_a_finish(raw: str | None, reason: str) -> None:
+    ending = await _ending(raw)
+
+    assert ending.type == "done"
+    assert ending.reason == reason

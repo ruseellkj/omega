@@ -249,6 +249,15 @@ It doesn't. Layer 2 established that Pi's loop exposes `transformContext`
 management (pruning old messages)"*, and compaction is simply an implementation of it, wired in
 at `harness/agent-harness.ts:493` and `coding-agent/src/core/sdk.ts:350`.
 
+> **Corrected 2026-09-28 — the paragraph above is wrong about Pi.** Those two lines do not
+> wire compaction: `harness/agent-harness.ts:493` emits the extension `context` hook, and
+> `coding-agent/src/core/sdk.ts:350-354` runs extension `context` handlers. Pi's compaction runs
+> *between* runs instead: `agent-harness.ts:783-785` (`compact()` refuses unless the harness is
+> idle), and in the coding agent `agent-session.ts:1096` after a run and `:1201` before the next
+> prompt. The hook is documented for pruning (`agent/src/types.ts:187-189`), but Pi's own 880-line
+> compaction does not use it. The property below still holds, by a different route: the loop
+> contains zero lines of compaction. omega is the one that puts compaction on the callback.
+
 **An 880-line compaction subsystem attaches to the loop through one optional callback.** That is
 the payoff of designing seams before features, and it's the single most important structural
 lesson for your Tier 3.

@@ -9,7 +9,8 @@ them:
 
 1. exactly one `start`
 2. exactly one terminal event — synthesised if the SDK stream ends without one
-3. stop reasons normalised to `stop` / `length` / `toolUse`
+3. stop reasons normalised to `stop` / `length` / `toolUse`, and an ending that
+   is not a finish (a refusal, a value nobody has seen) reported as an `error`
 4. **failures emitted as `error` events, never raised**
 
 Promise 4 is the counter-intuitive one. A stream that produced 500 tokens and
@@ -23,6 +24,7 @@ import asyncio
 import json
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from dataclasses import dataclass
 from typing import Any, cast
 
 from anthropic import APIStatusError, AsyncAnthropic, AuthenticationError
@@ -329,13 +331,72 @@ def to_anthropic_messages(messages: list[AgentMessage]) -> list[dict[str, Any]]:
     return out
 
 
-def normalise_stop_reason(raw: str | None, *, has_tool_calls: bool) -> DoneReason:
-    """Anthropic's spellings → the three canonical reasons."""
-    if has_tool_calls or raw == "tool_use":
+@dataclass(frozen=True, slots=True)
+class AbnormalStop:
+    """A stop reason that is not a finish, and what to tell the user about it.
+
+    A value rather than an exception, because the adapter must still end the
+    stream with one terminal event holding the partial reply. Raising into
+    `_stream` would reach the same error event, but prefixed with a class name
+    and routed through the retry decision, which has nothing to decide here.
+    """
+
+    message: str
+
+
+_KEPT = "The reply so far is kept."
+
+#: **Every value `anthropic.types.StopReason` declares**, mapped on purpose.
+#: Checked against the installed SDK (0.120.2) by
+#: `test_every_stop_reason_the_sdk_declares_is_mapped_on_purpose`, so an
+#: upgrade that adds a value fails a unit test rather than landing here unseen.
+#:
+#: This used to be two `if`s and "everything else is `stop`", which made a
+#: refusal, a paused turn and a context-window overflow all read as a finished
+#: answer. Pi keeps a table for the same reason and also makes `refusal` an error
+#: (`anthropic-messages.ts:1324-1352`). It differs on `pause_turn`, which it
+#: maps to `stop` ("Stop is good enough -> resubmit", line 1341). omega does
+#: nothing to resubmit a turn, so here a paused turn is said out loud instead.
+STOP_REASONS: dict[str, DoneReason | AbnormalStop] = {
+    "end_turn": "stop",
+    "stop_sequence": "stop",
+    "tool_use": "toolUse",
+    "max_tokens": "length",
+    # Cut off by the window, not finished: `length` is the reason that says so.
+    "model_context_window_exceeded": "length",
+    "refusal": AbnormalStop(f"The model declined to continue (stop reason 'refusal'). {_KEPT}"),
+    # Sent only for server-side tools, which omega does not use. Were it sent,
+    # continuing means sending the turn back, and nothing here does that.
+    "pause_turn": AbnormalStop(
+        "The provider paused this turn (stop reason 'pause_turn'), and omega does "
+        f"not support resuming a paused turn. {_KEPT}"
+    ),
+}
+
+
+def normalise_stop_reason(raw: str | None, *, has_tool_calls: bool) -> DoneReason | AbnormalStop:
+    """Anthropic's spellings → the three canonical reasons, or why it is not one.
+
+    **Content first.** Tool calls in the reply make it a tool turn whatever the
+    label says, which is the loop's own rule. It has to stay ahead of the table
+    here too: an `error` ending stops the loop, and a reply carrying calls that
+    stopped there would leave them unanswered.
+
+    **An unknown value is an error, not a finish.** Falling back to `stop`
+    never crashed, and it also never told anyone: a new kind of ending would read
+    as a clean answer indefinitely. Reporting it keeps the reply and names the
+    value, so the fix is one table row. A missing value is a finish.
+    """
+    if has_tool_calls:
         return "toolUse"
-    if raw == "max_tokens":
-        return "length"
-    return "stop"
+    if raw is None:
+        return "stop"
+    known = STOP_REASONS.get(raw)
+    if known is not None:
+        return known
+    return AbnormalStop(
+        f"The provider ended the reply with a stop reason omega does not know ({raw!r}). {_KEPT}"
+    )
 
 
 #: Supplies the API key, called immediately before each request. A callback
@@ -665,6 +726,13 @@ class AnthropicProvider:
 
         final = partial.model_copy(deep=True)
         reason = normalise_stop_reason(raw_stop, has_tool_calls=bool(final.tool_calls))
+        if isinstance(reason, AbnormalStop):
+            # The same ending every other failure gets: the text that arrived is
+            # kept, and the message says what happened in its place.
+            yield AssistantErrorEvent(
+                reason="error", error=self._error_message(partial, reason.message)
+            )
+            return
         final.stop_reason = reason
         yield AssistantDoneEvent(reason=reason, message=final)
     @staticmethod

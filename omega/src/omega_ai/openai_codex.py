@@ -71,6 +71,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from platform import machine, release
 from platform import system as os_name
 from typing import TYPE_CHECKING, Any
@@ -587,13 +588,81 @@ class CodexProvider:
 
                 elif kind in {"response.completed", "response.done", "response.incomplete"}:
                     partial.usage = _usage_of(event) or partial.usage
-                    if kind == "response.incomplete":
-                        reason = "length"
                     if text_open:
                         yield TextEndEvent(content_index=index, content=text, partial=partial)
+                    if kind == "response.incomplete":
+                        ending = incomplete_ending(event, has_tool_calls=bool(partial.tool_calls))
+                        if isinstance(ending, AbnormalStop):
+                            yield AssistantErrorEvent(
+                                reason="error", error=_errored(partial, ending.message)
+                            )
+                            return
+                        reason = ending
                     partial.stop_reason = reason
                     yield AssistantDoneEvent(reason=reason, message=partial)
                     return
+
+
+# ------------------------------------------------------------ how it ended
+
+
+@dataclass(frozen=True, slots=True)
+class AbnormalStop:
+    """An ending that is not a finish, and what to tell the user about it.
+
+    The same shape as `openai.AbnormalStop`, written out again rather than
+    imported: each adapter owns its vendor's mapping and inherits from nothing.
+    """
+
+    message: str
+
+
+_KEPT = "The reply so far is kept."
+
+#: `incomplete_details.reason` on a `response.incomplete`, **every value the SDK
+#: declares**, mapped on purpose and checked by
+#: `test_every_incomplete_reason_the_sdk_declares_is_mapped_on_purpose`.
+#:
+#: Every `response.incomplete` used to become `length`, so a reply the content
+#: filter stopped read as one that ran out of room. **Pi does the same**
+#: (`openai-responses-shared.ts:742` maps the whole `incomplete` status to
+#: `length`); omega deviates on purpose, to match its own Chat Completions
+#: adapter, which ends a content-filter stop as an error (`openai.py`,
+#: `FINISH_REASONS`). One vendor, two wire formats, one meaning.
+INCOMPLETE_REASONS: dict[str, DoneReason | AbnormalStop] = {
+    "max_output_tokens": "length",
+    "content_filter": AbnormalStop(
+        f"The provider's content filter stopped the reply (incomplete reason 'content_filter'). "
+        f"{_KEPT}"
+    ),
+}
+
+
+def incomplete_ending(
+    event: Mapping[str, Any], *, has_tool_calls: bool
+) -> DoneReason | AbnormalStop:
+    """Why a `response.incomplete` stopped, as a stop reason or as an error.
+
+    A reply carrying tool calls is never made an error, whatever the reason: an
+    `error` ending stops the loop and would leave those calls unanswered. It
+    stays `length`, as before, and the loop runs the calls because it follows
+    content. No reason at all is the old reading, `length` too. An unknown one
+    is named, not guessed, for the reason `openai.normalise_finish_reason` gives.
+    """
+    if has_tool_calls:
+        return "length"
+    response = event.get("response")
+    details = response.get("incomplete_details") if isinstance(response, Mapping) else None
+    raw = details.get("reason") if isinstance(details, Mapping) else None
+    if not isinstance(raw, str):
+        return "length"
+    known = INCOMPLETE_REASONS.get(raw)
+    if known is not None:
+        return known
+    return AbnormalStop(
+        f"The provider ended the reply as incomplete for a reason omega does not know "
+        f"({raw!r}). {_KEPT}"
+    )
 
 
 # ------------------------------------------------------------------- plumbing

@@ -195,3 +195,16 @@ async def test_a_failing_subagent_reports_instead_of_raising(tmp_path: Path) -> 
     answer = await _call(tool, "anything")
 
     assert answer, "something came back rather than an exception"
+
+
+async def test_a_cut_off_answer_reaches_the_parent_marked_incomplete(tmp_path: Path) -> None:
+    """**The parent model was handed half an answer as a finished one.** Nothing
+    on any screen shows the child's turns, so the tool result is the only place
+    the cut can be said."""
+    tool = _subagent(tmp_path, [text_turn("Found two of the", stop_reason="length")])
+
+    answer = await _call(tool, "find the callers")
+
+    assert "cut off" in answer
+    assert "Found two of the" in answer, "what it had is still passed on"
+

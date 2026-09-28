@@ -17,6 +17,12 @@ different answers to the same question.
 So this is not a feature added on top of correct code. It is a read path that was
 wrong in a way nothing could observe until something branched.
 
+**One thing the format could not say, found later:** where the conversation
+currently ends. A rewind with nothing asked after it moved only a pointer in
+memory, so quitting lost it. `entries.SessionBranch` now records it. That is a
+new record kind beside the entry, not a change to it, so the claim above holds:
+no entry changed shape and no old file became unreadable.
+
 ## Why a file is a tree at all
 
 Because the file is **append-only**, and that is not negotiable — it is what
@@ -95,7 +101,9 @@ def leaves(entries: list[SessionEntry]) -> list[SessionEntry]:
     conversation that can be resumed on its own.
 
     **File order is preserved** so the newest branch is last, which is what a
-    picker wants and what "continue where I was" means.
+    picker wants. It is no longer what "continue where I was" means: that is
+    `store._tip`, which also reads the rewinds the file records, so a branch
+    abandoned by a rewind is not resumed just because it was written last.
     """
     claimed = {entry.parent_id for entry in entries if entry.parent_id is not None}
     return [entry for entry in entries if entry.id not in claimed]

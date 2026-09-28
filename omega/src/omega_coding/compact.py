@@ -77,6 +77,21 @@ prefix on iteration 2 than iteration 1 of the same turn — which is precisely w
 prompt caching (failure #9, the other half of Tier 3) cannot tolerate, since
 cache markers need a byte-identical prefix. Every function here is pure in its
 input.
+
+**Pure was not enough, and that was measured.** Purity makes one turn agree with
+itself. It says nothing about the *next* turn, whose input is one unit longer.
+Dropping exactly the minimum moved the cut every turn, and the elision note's
+count with it, so consecutive requests shared only their first message and
+Anthropic re-wrote nearly the whole request to its cache each turn, at 1.25x the
+price of plain input. A compacted turn's messages cost about 125% of sending
+them uncached.
+
+So the automatic pass drops history in **steps** (`STEP_FRACTION`). It rounds the
+drop up to a whole number of steps and cuts at the first unit boundary past
+that. Units that are already old never change, so the same rounding lands on the
+same boundary turn after turn, and each request is the previous one plus the new
+turn until the drop crosses the next step. Still pure: the cut is a function of
+the input alone, with no memory of where the last one was.
 """
 
 from __future__ import annotations
@@ -96,6 +111,26 @@ from omega_coding.context import CHARS_PER_TOKEN, estimate_request_tokens, windo
 #: to be wrong; the reply still has to fit; and arriving at the limit with no room
 #: to compact *in* is the failure this exists to prevent.
 DEFAULT_THRESHOLD = 0.8
+
+#: The automatic pass drops history in chunks of about this much of the window.
+#:
+#: **Why a step at all:** a cut that moves every turn breaks the cached prefix
+#: every turn (see "Pure was not enough" above). A step holds the cut still for
+#: about `step / unit size` turns. At 200,000 tokens a step is 60,000, which is
+#: about 56 turns that each read a 4,200-character file.
+#:
+#: **Why 30%:** after a step the request falls to about 50% of the window at the
+#: default 80% threshold, so it has room to grow for many turns before the next
+#: step, and it still keeps more than half of what fits. A smaller step moves the
+#: cut more often; a larger one forgets more at once.
+#:
+#: **What it costs.** Each step drops more than the minimum, so a compacted
+#: request carries less history than the tightest fit would. And it helps only
+#: when a step spans several units: when one turn is larger than a step, the cut
+#: moves nearly every turn anyway and the extra drop buys nothing. It is a
+#: fraction of the window, not of the budget, so with a `--compact-threshold` not
+#: far above it one step can take most of what fits.
+STEP_FRACTION = 0.3
 
 #: A result is never shrunk below this. Small enough not to matter, large enough
 #: that what survives says what happened rather than being an empty string.
@@ -200,6 +235,31 @@ def _trim_prose(message: AssistantMessage, max_tokens: int) -> AssistantMessage:
     return message.model_copy(update={"content": blocks}) if changed else message
 
 
+def _stepped(costs: list[int], minimum: int, step: int) -> int:
+    """How many of the oldest units to drop, rounded up to whole steps.
+
+    `minimum` is the fewest that must go for the rest to fit. The tokens those
+    hold are rounded **up** to a multiple of `step`, and the cut goes at the
+    first unit boundary at or past that amount. Up, so the result still fits:
+    it can only drop more than the minimum, never less.
+
+    **Why this holds the cut still.** `costs` for units already in the
+    transcript are the same every turn, so for a given rounded amount the
+    boundary is the same every turn too. That amount changes only when the
+    minimum crosses the next multiple of `step`, and until then the request is
+    the previous one plus the new turn.
+
+    The newest unit is never dropped, whatever the rounding says, for the reason
+    `_fit` keeps it: a request without what the model just did is useless.
+    """
+    target = -(-sum(costs[:minimum]) // step) * step  # ceiling, in whole steps
+    dropped, total = 0, 0
+    while dropped < len(costs) - 1 and total < target:
+        total += costs[dropped]
+        dropped += 1
+    return max(dropped, minimum)
+
+
 class Compactor:
     """A `transform_context` hook that keeps a request under the window.
 
@@ -250,7 +310,8 @@ class Compactor:
             # The common case, and it must stay free: compaction that fires when
             # it is not needed is lost fidelity for nothing.
             return list(messages)
-        return self._fit(list(messages), self.budget)
+        # Read at call time, not construction: `/model` can change the window.
+        return self._fit(list(messages), self.budget, step=int(self.window * STEP_FRACTION))
 
     def compact_to(self, messages: list[AgentMessage], fraction: float) -> list[AgentMessage]:
         """Compact to an explicit fraction of the window. What `/compact` calls.
@@ -258,15 +319,27 @@ class Compactor:
         Unconditional, unlike `__call__`: a manual command that quietly did
         nothing because you happened to be under the ceiling would be worse than
         no command. Whether anything actually changed is the caller's to report.
+
+        **Exact, with no step.** It runs once, on purpose, to a target someone
+        chose, and its result replaces the transcript. There is no next request
+        whose prefix it has to match, so rounding the drop up would only forget
+        more than was asked.
         """
         return self._fit(list(messages), self.budget_for(fraction))
 
-    def _fit(self, messages: list[AgentMessage], budget: int) -> list[AgentMessage]:
+    def _fit(
+        self, messages: list[AgentMessage], budget: int, *, step: int = 0
+    ) -> list[AgentMessage]:
         """The algorithm.
 
         `budget` is passed rather than read off `self`, so the automatic ceiling
         and a manual target share one implementation. Two code paths that could
         disagree about what "compacted" means would be one bug waiting.
+
+        `step` is the one place they differ, and it is a parameter for the same
+        reason. `0` drops the minimum that fits, which is what `/compact` wants.
+        Above zero, the drop is rounded up to whole steps (`_stepped`), which is
+        what keeps the automatic pass's cut still from one turn to the next.
         """
         units = _units(messages)
         if len(units) <= 1:
@@ -280,24 +353,30 @@ class Compactor:
         reserve = self.estimate(head)
         reserve += self.estimate([UserMessage(content=_elision_note(len(rest)))])
 
-        kept: list[list[AgentMessage]] = []
+        # Every unit's cost, oldest first. A unit that is already in the
+        # transcript never changes, so these are the same numbers every turn,
+        # which is what lets a stepped cut land in the same place.
+        costs = [self.estimate(unit) for unit in rest]
+
+        kept = 0
         used = 0
-        for unit in reversed(rest):
-            cost = self.estimate(unit)
+        for cost in reversed(costs):
             # `and kept` keeps the newest turn whatever it costs. A request
             # missing what the model just did is useless; an oversized one is
             # merely expensive, and `_shrink` still has a say.
             if used + cost + reserve > budget and kept:
                 break
-            kept.append(unit)
+            kept += 1
             used += cost
-        kept.reverse()
 
-        dropped = len(rest) - len(kept)
+        dropped = len(rest) - kept
+        if step > 0 and dropped:
+            dropped = _stepped(costs, dropped, step)
+
         sent: list[AgentMessage] = list(head)
         if dropped:
             sent.append(UserMessage(content=_elision_note(dropped)))
-        for unit in kept:
+        for unit in rest[dropped:]:
             sent.extend(unit)
 
         # Dropping whole turns is not always enough — one turn can exceed the
@@ -349,7 +428,9 @@ class Compactor:
         Reached only when cutting tool output was not enough — a chatty model, or
         a single answer larger than the whole budget. **Found by fuzzing**: 3,000
         random transcripts left 257 over budget, and every one of them had no tool
-        results to cut, so pass one could do nothing.
+        results to cut, so pass one could do nothing. (`TIER-3.md` says 279. Both
+        were written in `fc88a8f`, the fuzz script was not kept, so neither can be
+        re-run; and the cut has changed since, now that history drops in steps.)
         """
         positions = [
             i
