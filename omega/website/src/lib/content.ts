@@ -201,7 +201,7 @@ export const timeline = [
     tier: "Tier 3",
     status: "closed" as const,
     headline: "Survives a task long enough to fill the context window, and has a face.",
-    body: "Compaction closed beginner failure #1. Prompt caching, for #9, is built and tested, but no cache hit has been observed yet. A Textual UI made steering reachable by a human rather than only by a test, and the ten agent events turned out to be the contract a real UI needed.",
+    body: "Compaction closed beginner failure #1. Prompt caching, for #9, is proven on OpenAI but not yet on Anthropic, so the scorecard reads 8 of 9. A Textual UI made steering reachable by a human rather than only by a test, and the ten agent events turned out to be the contract a real UI needed.",
   },
   {
     tier: "Beyond the tiers",
