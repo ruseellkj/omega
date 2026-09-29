@@ -18,7 +18,7 @@ tests, all offline · `loop.py` at 190.**
 The answer is 8,699 — just under the range, and the first estimate in this
 project not to run low. The factor was the useful part, not the original guess.
 
-**`loop.py` did not move.** Eight tiers of feature work — compaction, caching,
+**`loop.py` did not move.** Nine pieces of feature work — compaction, caching,
 redaction, search, logging, a TUI, branching, subagents, images — and the loop is
 the same 190 lines it was when Tier 2 closed. Every one of them filled a seam
 that already existed, except `before_record`, which added one and is the reason
@@ -157,6 +157,15 @@ because the key on this machine returns `credit balance is too low`. Two turns
 against a live provider with `cache_read_input_tokens > 0` closes it. The
 scorecard stays at **8 of 9** until then.
 
+*Found 2026-09-28:* **compaction had been undoing the markers once it started.**
+Dropping exactly the minimum moved the cut every turn, and the `[compacted]` note's
+count with it, so consecutive compacted requests shared only their first message.
+Breakpoint 3 then marked a prefix the next request no longer had, and a cache could
+reuse almost nothing. Stepped compaction (see "Compaction — landed") holds the cut
+still, so a compacted request extends the one before it until the next step, which
+`test_consecutive_compacted_requests_share_their_prefix` pins. That is measured on the
+requests omega builds, not on a live provider, so the scorecard is still **8 of 9**.
+
 ### Everything else Tier 3 adds
 
 | Missing | What it costs today | The seam | Seam status |
@@ -205,6 +214,16 @@ two deliberate refusals — the user's own words exceeding the budget (74), or t
 `MIN_RESULT_TOKENS` floor multiplied out on an absurdly small window (19,
 overshooting by 2 tokens). The trade is stated in the module: **validity is
 absolute, size is best-effort.**
+
+*Changed 2026-09-28:* **the automatic cut now moves in steps.** Dropping exactly the
+minimum broke the cached prefix every turn (see the caching section), so the automatic
+pass rounds the drop up to whole steps of 30% of the window (`STEP_FRACTION`) and the
+cut holds still for many turns. `/compact` still drops exactly what it must. Two guards
+keep a step from costing more than it saves: the step shrinks with a
+`--compact-threshold` below 0.8, and a step that would leave less than half the budget
+is not taken. Without them, ten 4,200-character reads in a 4,000-token window sent none
+of the two reads that fit. The 21-message measurement above predates the steps.
+`compact.py` carries the argument, under "What it costs, and the two guards".
 
 ### Redaction at the transcript boundary — landed
 

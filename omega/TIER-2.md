@@ -72,7 +72,7 @@ From `../docs/03-architecture/02-beginner.md`. This is the honest scorecard.
 | *no persistence* | **Tier 2** |
 | **#7** switching providers means a rewrite | Tier 1 built the seam · **Tier 2 proves it** |
 | **#1** context fills up and dies | Tier 3 — compaction |
-| **#9** it costs more than it should | Tier 3 — prompt caching |
+| **#9** it costs more than it should | Tier 3 — prompt caching: proven on OpenAI, not yet on Anthropic (`TIER-3.md`) |
 
 Tier 2 adds the *instruments* for #1 and #9 — a context gauge and a cost total — without the
 fixes. You will be able to watch both problems approach before Tier 3 solves them.

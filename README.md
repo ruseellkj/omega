@@ -214,7 +214,9 @@ shell escape, and a single event loop. → [`TIER-2.md`](omega/TIER-2.md)
 
 **2026-09-17 · 8,699 lines · 512 tests**
 
-Compaction and prompt caching closed the last two failures, **1** and **9**. A Textual terminal UI
+Compaction closed failure **1**. Prompt caching, failure **9**, is proven on OpenAI, where a live run
+read 32% of its input from the cache, but not yet on Anthropic, so the scorecard reads **8 of 9**.
+A Textual terminal UI
 made steering reachable by a person rather than only by a test — and it needed no new agent events:
 it reads the same ten the plain REPL does. Session branching, search tools, structured logging,
 image reading and subagents shipped alongside. Tier 3's size estimate was also the first in the
@@ -224,7 +226,8 @@ project not to run low. → [`TIER-3.md`](omega/TIER-3.md)
 
 **2026-09-29 · tag [`v0.1.1`](https://github.com/ruseellkj/omega/tree/v0.1.1) · 15,931 lines · 845 tests**
 
-With every beginner failure closed, the work moved from the tier scorecard to the
+With eight of the nine beginner failures proven fixed, and the ninth waiting only on a live Anthropic
+cache hit, the work moved from the tier scorecard to the
 [product backlog](omega/PRODUCT-BACKLOG.md):
 
 - **Sign-in** — browser OAuth for a Claude or ChatGPT subscription, or an API key, stored at `0600`
