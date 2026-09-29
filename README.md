@@ -222,7 +222,7 @@ project not to run low. → [`TIER-3.md`](omega/TIER-3.md)
 
 ### Beyond the tiers — a product
 
-**Today (2026-09-25) · 15,179 lines · 770 tests**
+**2026-09-29 · tag [`v0.1.1`](https://github.com/ruseellkj/omega/tree/v0.1.1) · 15,931 lines · 845 tests**
 
 With every beginner failure closed, the work moved from the tier scorecard to the
 [product backlog](omega/PRODUCT-BACKLOG.md):
@@ -246,18 +246,18 @@ that closed it.
 %%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#A33A4F"}}}}%%
 xychart-beta
     title "Lines of source"
-    x-axis ["Tier 0", "Tier 1", "Tier 2", "Tier 2 final", "Tier 3", "Today"]
-    y-axis "lines" 0 --> 15000
-    bar [188, 1577, 4654, 6247, 8699, 14226]
+    x-axis ["Tier 0", "Tier 1", "Tier 2", "Tier 2 final", "Tier 3", "v0.1.0", "v0.1.1"]
+    y-axis "lines" 0 --> 16000
+    bar [188, 1577, 4654, 6247, 8699, 15183, 15931]
 ```
 
 ```mermaid
 %%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#A33A4F"}}}}%%
 xychart-beta
     title "Tests"
-    x-axis ["Tier 1", "Tier 2", "Tier 2 final", "Tier 3", "Today"]
-    y-axis "tests" 0 --> 800
-    line [45, 289, 395, 512, 713]
+    x-axis ["Tier 1", "Tier 2", "Tier 2 final", "Tier 3", "v0.1.0", "v0.1.1"]
+    y-axis "tests" 0 --> 900
+    line [45, 289, 395, 512, 770, 845]
 ```
 
 | Milestone | Date | Source files | Source lines | Tests |
@@ -267,7 +267,8 @@ xychart-beta
 | Tier 2 | 2026-08-24 | 32 | 4,654 | 289 |
 | Tier 2 final | 2026-09-16 | 38 | 6,247 | 395 |
 | Tier 3 | 2026-09-17 | 46 | 8,699 | 512 |
-| Today | 2026-09-23 | 57 | 14,226 | 713 |
+| v0.1.0 | 2026-09-25 | 58 | 15,183 | 770 |
+| v0.1.1 | 2026-09-29 | 58 | 15,931 | 845 |
 
 Through all of it, `loop.py` has not grown past 190 lines.
 
