@@ -19,4 +19,4 @@ exactly what Tau does.
 #: The same string as `version` in `pyproject.toml`, which is the source;
 #: `tests/test_version.py` fails when the two differ. It said "0.2.0" from the
 #: three-package split until 0.1.0 had already shipped.
-__version__ = "0.1.0"
+__version__ = "0.1.1"
