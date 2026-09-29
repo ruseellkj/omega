@@ -10,8 +10,26 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tomllib
+from pathlib import Path
 
+import omega_agent
 from omega_coding import version as version_module
+
+
+def test_the_core_package_states_the_version_in_pyproject() -> None:
+    """**It said 0.2.0 while 0.1.0 was on PyPI.** `omega_agent.__version__` was
+    set when omega split into three packages and never touched again, so the
+    one version a library user reads was wrong in the release itself.
+
+    It stays a constant rather than reading package metadata: `omega_agent`
+    must not know which distribution carries it (`omega_coding.version` tries
+    three names), and metadata is only current after a reinstall. So it is
+    pinned here to `pyproject.toml`, and a version bump that misses it fails.
+    """
+    pyproject = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
+
+    assert omega_agent.__version__ == pyproject["project"]["version"]
 
 
 def test_the_distribution_is_the_new_name_and_both_old_ones_still_resolve() -> None:
