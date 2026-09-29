@@ -13,7 +13,7 @@ export const metadata: Metadata = {
 /**
  * A releases page where most rows are not downloads.
  *
- * Two are, v0.1.0 and v0.1.1 on PyPI. The honest version of this page says at
+ * Three are, the v0.1 releases on PyPI. The honest version of this page says at
  * the top which rows those are, rather than looking like every other releases
  * page and quietly implying the rest are too. What the tier tags are good for
  * is reading: each is a point where the code was coherent and a
@@ -26,7 +26,7 @@ export default function ReleasesPage() {
       <PageHeader
         eyebrow="releases"
         title="Every tag, and what it weighed."
-        lede="Two releases on PyPI, and before them the points where the code was coherent and a tier document described it. Each figure is measured from the tag itself, so a row cannot drift from what it points at."
+        lede="Three releases on PyPI, and before them the points where the code was coherent and a tier document described it. Each figure is measured from the tag itself, so a row cannot drift from what it points at."
       >
         <div className="mt-8 flex flex-wrap items-baseline gap-x-8 gap-y-3">
           <span className="flex items-baseline gap-2.5">
@@ -44,7 +44,7 @@ export default function ReleasesPage() {
       <Reveal>
         <div className="mt-10 border-t-2 border-rule-strong pt-7 md:mt-14">
           <p className="m-0 max-w-[62ch] text-ink-muted">
-            <span className="text-ink">v0.1.1 is the latest on PyPI, after v0.1.0.</span> Both publish as{" "}
+            <span className="text-ink">v0.1.1.post1 is the latest on PyPI: v0.1.1&rsquo;s code with a corrected project page.</span> All three publish as{" "}
             <code className="font-mono text-sm">omega-coding-agent</code>, and the command they
             install is <code className="font-mono text-sm">omega</code>. The tier tags below them are
             points in this repository&rsquo;s history, not downloads — read them with the clone

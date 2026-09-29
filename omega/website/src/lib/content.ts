@@ -207,7 +207,7 @@ export const timeline = [
     tier: "Beyond the tiers",
     status: "shipped" as const,
     headline: "Installable, and signed in to.",
-    body: "A curl installer, CI and a release workflow. /login signs in with a Claude or ChatGPT subscription in the browser, or stores an API key in a 0600 file. The model list refreshes from models.dev. v0.1.1 is on PyPI as omega-coding-agent, published by the release workflow over OIDC with no token in the repository.",
+    body: "A curl installer, CI and a release workflow. /login signs in with a Claude or ChatGPT subscription in the browser, or stores an API key in a 0600 file. The model list refreshes from models.dev. v0.1.1.post1 is on PyPI as omega-coding-agent, published by the release workflow over OIDC with no token in the repository.",
   },
 ] as const;
 
@@ -231,11 +231,21 @@ export const upcoming = [
  * from the code it points at.
  *
  * These are git tags and GitHub Releases, which is not the same list as the
- * versions on PyPI: only v0.1.0 and v0.1.1 were published to an index, and
+ * versions on PyPI: only the v0.1 releases were published to an index, and
  * `pypi` marks them. The tier tags below are points in the source's history,
  * and the page says so rather than implying every row is a download.
  */
 export const releases = [
+  {
+    tag: "v0.1.1.post1",
+    date: "2026-09-29",
+    title: "The PyPI page, corrected",
+    body: "No code changes from v0.1.1. PyPI freezes the project page from the README inside each upload, and 0.1.1's still quoted 15,179 lines and 770 tests. This one carries the figures measured at the tag.",
+    lines: "15,931",
+    files: "58",
+    tests: "845",
+    pypi: true,
+  },
   {
     tag: "v0.1.1",
     date: "2026-09-29",
