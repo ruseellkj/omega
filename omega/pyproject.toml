@@ -4,7 +4,7 @@
 # user-facing changes — a distribution name and a command are different things,
 # exactly as Tau publishes `tau-ai` and installs `tau`.
 name = "omega-coding-agent"
-version = "0.1.1"
+version = "0.1.1.post1"
 description = "A terminal coding agent, built from scratch in layers."
 readme = "README.md"
 # Tau's two lines (research/tau/pyproject.toml:10-11). The file is a copy of the
