@@ -36,7 +36,7 @@ const LESSONS = [
   },
   {
     title: "Write the fake before the real adapter.",
-    body: "A fake provider is not a testing convenience, it is a design check. If it is hard to write, the interface is too big. Writing it first is also why the whole suite runs offline — 713 tests today, no key, no network.",
+    body: "A fake provider is not a testing convenience, it is a design check. If it is hard to write, the interface is too big. Writing it first is also why the whole suite runs offline — 845 tests today, no key, no network.",
   },
 ] as const;
 

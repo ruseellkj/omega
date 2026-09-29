@@ -109,7 +109,7 @@ export function Hero() {
           >
             <span aria-hidden="true" className="size-1.5 rounded-full bg-forest" />
             <span className="label text-ink-muted transition-colors duration-200 group-hover:text-ink">
-              v0.1.0 · Tier 3 complete
+              v0.1.1 · Tier 3 complete
             </span>
             <span aria-hidden="true" className="text-ink-muted transition-transform duration-200 group-hover:translate-x-0.5">
               →

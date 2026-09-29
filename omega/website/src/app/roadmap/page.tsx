@@ -30,7 +30,7 @@ const TIERS: {
       {
         name: "The two failures it closed",
         items: [
-          { name: "Compaction", note: "summarise the old prefix, keep the recent tail", state: "shipped" },
+          { name: "Compaction", note: "drop the oldest turns in steps, keep the first and the newest", state: "shipped" },
           { name: "Prompt caching", note: "four breakpoints on a byte-stable prefix", state: "shipped" },
         ],
       },

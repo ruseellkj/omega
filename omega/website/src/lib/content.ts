@@ -45,9 +45,10 @@ export const install = "curl -fsSL https://omega-coding-agent.vercel.app/install
  * The install box's tabs. Pi's landing page offers five ways in; omega has
  * three that actually work today, and each was run end to end into an empty
  * tool directory before it went on the page — `omega --version` answered
- * `omega 0.1.0` from all three.
+ * `omega 0.1.1` from all three, re-run into empty tool directories on
+ * 2026-09-29.
  *
- * There is no `pip install` tab even now that v0.1.0 is on PyPI: omega needs
+ * There is no `pip install` tab even now that omega is on PyPI: omega needs
  * Python 3.14, and `uv` fetches an interpreter itself where `pip` requires you
  * to already have one. `source` is one line, joined with `&&`, so the copy
  * button hands over something pasteable rather than four prompts.
@@ -85,7 +86,7 @@ export const installMethods = [
 export const features = [
   {
     title: "Asks before it acts",
-    body: "Writes, shell commands and anything outside the working directory wait for your yes, and it remembers the answer. A short list it refuses outright, even with --yes.",
+    body: "Writes, shell commands and anything outside the working directory wait for your yes, and it remembers the answer, except for OMEGA.md, .env and .git, which it asks about every time. A short list it refuses outright, even with --yes.",
     cmd: "--confine",
   },
   {
@@ -95,7 +96,7 @@ export const features = [
   },
   {
     title: "Survives a long task",
-    body: "At 80% of the context window it compacts the older turns into a summary, and prompt caching keeps the repeated prefix cheap.",
+    body: "At 80% of the context window it drops the oldest turns from what it sends and leaves a note; the saved session keeps them all. It drops them in steps, so most requests start the same way as the one before, which a prompt cache can reuse.",
     cmd: "/compact",
   },
   {
@@ -110,7 +111,7 @@ export const features = [
   },
   {
     title: "Scriptable, and discreet",
-    body: "One shot to stdout for a pipe or a script. Anything shaped like a key is masked before a message is stored.",
+    body: "One shot to stdout for a pipe or a script, exiting 1 if the answer was cut off. Anything shaped like a key is masked before a message is stored.",
     cmd: 'omega -p "…"',
   },
 ] as const;
@@ -176,9 +177,9 @@ export const sessionCommands = [
 
 /** TIER-2.md, the comparison table at lines 14-19. */
 export const measured = [
-  { label: "Source lines", tier1: "1,577", tier2: "4,654", today: "15,179" },
-  { label: "Test lines", tier1: "499", tier2: "4,257", today: "14,556" },
-  { label: "Tests", tier1: "45", tier2: "289", today: "770" },
+  { label: "Source lines", tier1: "1,577", tier2: "4,654", today: "15,931" },
+  { label: "Test lines", tier1: "499", tier2: "4,257", today: "15,733" },
+  { label: "Tests", tier1: "45", tier2: "289", today: "845" },
   { label: "loop.py", tier1: "151", tier2: "190", today: "190" },
 ] as const;
 
@@ -200,13 +201,13 @@ export const timeline = [
     tier: "Tier 3",
     status: "closed" as const,
     headline: "Survives a task long enough to fill the context window, and has a face.",
-    body: "Compaction and prompt caching closed the last two beginner failures. A Textual UI made steering reachable by a human rather than only by a test, and the ten agent events turned out to be the contract a real UI needed.",
+    body: "Compaction closed beginner failure #1. Prompt caching, for #9, is built and tested, but no cache hit has been observed yet. A Textual UI made steering reachable by a human rather than only by a test, and the ten agent events turned out to be the contract a real UI needed.",
   },
   {
     tier: "Beyond the tiers",
     status: "shipped" as const,
     headline: "Installable, and signed in to.",
-    body: "A curl installer, CI and a release workflow. /login signs in with a Claude or ChatGPT subscription in the browser, or stores an API key in a 0600 file. The model list refreshes from models.dev. v0.1.0 is on PyPI as omega-coding-agent, published by the release workflow over OIDC with no token in the repository.",
+    body: "A curl installer, CI and a release workflow. /login signs in with a Claude or ChatGPT subscription in the browser, or stores an API key in a 0600 file. The model list refreshes from models.dev. v0.1.1 is on PyPI as omega-coding-agent, published by the release workflow over OIDC with no token in the repository.",
   },
 ] as const;
 
@@ -230,11 +231,31 @@ export const upcoming = [
  * from the code it points at.
  *
  * These are git tags and GitHub Releases, which is not the same list as the
- * versions on PyPI: only v0.1.0 was published to an index. The tier tags below
- * it are points in the source's history, and the page says so rather than
- * implying every row is a download.
+ * versions on PyPI: only v0.1.0 and v0.1.1 were published to an index, and
+ * `pypi` marks them. The tier tags below are points in the source's history,
+ * and the page says so rather than implying every row is a download.
  */
 export const releases = [
+  {
+    tag: "v0.1.1",
+    date: "2026-09-29",
+    title: "Bug fixes: the approval gate, retries, cut-off replies",
+    body: "A path starting with ~ is judged by where it points, and OMEGA.md, .env and .git are asked about every time. A rate-limited request goes out 3 times, not 9. A reply cut off at the length limit says so, and -p exits 1. A /rewind is saved, and compaction drops history in steps a prompt cache can reuse.",
+    lines: "15,931",
+    files: "58",
+    tests: "845",
+    pypi: true,
+  },
+  {
+    tag: "v0.1.0",
+    date: "2026-09-25",
+    title: "The first release on PyPI",
+    body: "Tier 3 complete, with the Textual UI as the default screen, /login for a Claude or ChatGPT subscription or an API key, and a release workflow that uploads over OIDC with no token in the repository.",
+    lines: "15,183",
+    files: "58",
+    tests: "770",
+    pypi: true,
+  },
   {
     tag: "tier-2-final",
     date: "2026-09-16",
@@ -243,6 +264,7 @@ export const releases = [
     lines: "6,247",
     files: "38",
     tests: "395",
+    pypi: false,
   },
   {
     tag: "tier-2",
@@ -252,6 +274,7 @@ export const releases = [
     lines: "4,654",
     files: "32",
     tests: "289",
+    pypi: false,
   },
   {
     tag: "tier-2-pre-exam",
@@ -261,6 +284,7 @@ export const releases = [
     lines: "4,160",
     files: "31",
     tests: "—",
+    pypi: false,
   },
   {
     tag: "tier-1",
@@ -270,5 +294,6 @@ export const releases = [
     lines: "1,577",
     files: "12",
     tests: "45",
+    pypi: false,
   },
 ] as const;

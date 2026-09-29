@@ -11,11 +11,12 @@ export const metadata: Metadata = {
 };
 
 /**
- * A releases page for a project that ships no package.
+ * A releases page where most rows are not downloads.
  *
- * The honest version of this page says so at the top rather than looking like
- * every other releases page and quietly implying a download. What these tags
- * are good for is reading: each is a point where the code was coherent and a
+ * Two are, v0.1.0 and v0.1.1 on PyPI. The honest version of this page says at
+ * the top which rows those are, rather than looking like every other releases
+ * page and quietly implying the rest are too. What the tier tags are good for
+ * is reading: each is a point where the code was coherent and a
  * tier document described it, so `git checkout tier-1` is a way to see the
  * agent before it learned each thing.
  */
@@ -25,7 +26,7 @@ export default function ReleasesPage() {
       <PageHeader
         eyebrow="releases"
         title="Every tag, and what it weighed."
-        lede="Points where the code was coherent and a tier document described it. Each figure is measured from the tag itself, so a row cannot drift from what it points at."
+        lede="Two releases on PyPI, and before them the points where the code was coherent and a tier document described it. Each figure is measured from the tag itself, so a row cannot drift from what it points at."
       >
         <div className="mt-8 flex flex-wrap items-baseline gap-x-8 gap-y-3">
           <span className="flex items-baseline gap-2.5">
@@ -33,8 +34,8 @@ export default function ReleasesPage() {
             <span className="label text-ink-muted">tags</span>
           </span>
           <span className="flex items-baseline gap-2.5">
-            <span className="tnum font-serif text-2xl">0</span>
-            <span className="label text-ink-muted">packages published</span>
+            <span className="tnum font-serif text-2xl">{releases.filter((r) => r.pypi).length}</span>
+            <span className="label text-ink-muted">on PyPI</span>
           </span>
         </div>
       </PageHeader>
@@ -43,9 +44,9 @@ export default function ReleasesPage() {
       <Reveal>
         <div className="mt-10 border-t-2 border-rule-strong pt-7 md:mt-14">
           <p className="m-0 max-w-[62ch] text-ink-muted">
-            <span className="text-ink">Only v0.1.0 is on PyPI.</span> It publishes as{" "}
-            <code className="font-mono text-sm">omega-coding-agent</code>, and the command it
-            installs is <code className="font-mono text-sm">omega</code>. The tier tags below it are
+            <span className="text-ink">v0.1.1 is the latest on PyPI, after v0.1.0.</span> Both publish as{" "}
+            <code className="font-mono text-sm">omega-coding-agent</code>, and the command they
+            install is <code className="font-mono text-sm">omega</code>. The tier tags below them are
             points in this repository&rsquo;s history, not downloads — read them with the clone
             command underneath. The release workflow uploads over OIDC with no token stored
             anywhere; the mechanics are in{" "}
